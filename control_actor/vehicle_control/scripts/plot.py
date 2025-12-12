@@ -24,7 +24,7 @@ COLORS = {
 }
 
 # 文件路径 (请修改为你本地的实际路径)
-FILE_PATH = r'H:\无人驾驶\论文\图片\第2篇\code\Matlab\mppi_log_20251209_201923.csv'
+FILE_PATH = r'/home/user/dynamic_map/src/twinpark/control_actor/vehicle_control/logs/mppi_log_20251212_231319.csv'
 
 # %% 1. 数据读取与处理
 def load_data(file_path):
@@ -75,14 +75,17 @@ def load_data(file_path):
             'y_ref': df.iloc[:, 2].values,
             'x_vir': df.iloc[:, 5].values,
             'y_vir': df.iloc[:, 6].values,
-            'vir_steer': df.iloc[:, 12].values, # col 13
-            'vir_accel': df.iloc[:, 13].values, # col 14
             'ref_v': df.iloc[:, 4].values,      # col 5
             'vir_v': df.iloc[:, 8].values,      # col 9
-            'e_Vy': df.iloc[:, 9].values,       # col 10
-            'e_Vth': df.iloc[:, 10].values,     # col 11
+            'vir_vx': df.iloc[:, 9].values,      # col 10
+            'vir_vy': df.iloc[:, 10].values,      # col 11
             'e_Vx': df.iloc[:, 11].values,      # col 12
-            'comp_time_ms': df.iloc[:, 15].values # col 16
+            'e_Vy': df.iloc[:, 12].values,       # col 13
+            'e_Vth': df.iloc[:, 13].values,     # col 14
+            'e_Vv': df.iloc[:, 14].values,      # col 15
+            'vir_steer': df.iloc[:, 15].values, # col 16
+            'vir_accel': df.iloc[:, 16].values, # col 17
+            'comp_time_ms': df.iloc[:, 18].values # col 19
         }
 
     # 时间轴处理
@@ -185,14 +188,16 @@ def plot_velocities():
     for spine in ax1.spines.values(): spine.set_linewidth(2)
 
     # 子图2：虚拟车速度
-    ax2.plot(data['time'], data['vir_v'], color=COLORS['dark_blue'], linewidth=2.5)
+    ax2.plot(data['time'], data['vir_v'], color=COLORS['dark_blue'], linewidth=2.5, label=r'$v_{V}$')
+    ax2.plot(data['time'], data['vir_vx'], color=COLORS['red'], linewidth=2.5, label=r'$v_{V_x}$')
+    ax2.plot(data['time'], data['vir_vy'], color=COLORS['green'], linewidth=2.5, label=r'$v_{V_y}$')
     ax2.grid(True)
     ax2.set_xlim([0, max(data['time'])])
     ax2.set_xlabel('Time(s)', fontsize=18) # 注意：MATLAB 代码中这里没指定 fontsize，但通常需要
-    ax2.set_ylabel(r'$v_{V}$(m/s)', fontsize=22)
+    ax2.set_ylabel(r'Velocity(m/s)', fontsize=22)
     ax2.tick_params(labelsize=18, width=2)
     for spine in ax2.spines.values(): spine.set_linewidth(2)
-
+    ax2.legend(fontsize=16, loc='best')
     plt.tight_layout()
     # plt.show()
 
@@ -220,7 +225,7 @@ def plot_errors():
     
     # Vtheta Error
     ax3.plot(data['time'], data['e_Vth'], color=COLORS['dark_blue'], linewidth=2.5)
-    setup_error_ax(ax3, r'${e}_{V\theta}$ (m)', is_bottom=True) # 注意：MATLAB 代码 label 单位写的是 m，尽管这是角度
+    setup_error_ax(ax3, r'${e}_{V\theta}$ (rad)', is_bottom=True) 
     
     plt.tight_layout()
     # plt.show()

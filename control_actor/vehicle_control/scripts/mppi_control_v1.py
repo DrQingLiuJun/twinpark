@@ -76,7 +76,7 @@ class MPPIController:
         self.u_prev = torch.zeros((self.T, self.dim_u), dtype=torch.float32, device=self.device)
 
     def set_reference_path(self, trajectory: Trajectory):
-        """Update reference path from trajectory message"""
+        """Update reference path and calculate accumulated arc length"""
         num_points = len(trajectory.x)
         ref_path_np = np.zeros((num_points, 4))
         ref_path_np[:, 0] = trajectory.x
@@ -85,8 +85,21 @@ class MPPIController:
         ref_path_np[:, 3] = trajectory.vx
         
         self.ref_path = torch.tensor(ref_path_np, dtype=torch.float32, device=self.device)
+        
+        # --- 新增：计算路径点的累积弧长 ---
+        # 计算相邻点之间的欧氏距离
+        diffs = ref_path_np[1:, :2] - ref_path_np[:-1, :2]
+        dists = np.linalg.norm(diffs, axis=1)
+        
+        # 累积求和得到 s
+        self.path_s = np.zeros(num_points)
+        self.path_s[1:] = np.cumsum(dists)
+        
+        # 重置状态
+        self.current_s_progress = 0.0  # 当前参考点在路径上的位置 (m)
         self.prev_waypoints_idx = 0
-        rospy.loginfo(f"Reference path updated with {num_points} points")
+        
+        rospy.loginfo(f"Reference path updated with {num_points} points, total length: {self.path_s[-1]:.2f}m")
 
     def calc_control_input(self, observed_x: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float, float]:
         """
@@ -110,7 +123,7 @@ class MPPIController:
         
         # Update nearest waypoint index
         prev_idx = self.prev_waypoints_idx
-        self._update_nearest_waypoint_index(observed_x[0], observed_x[1])
+        self._update_reference_progress(observed_x[0], observed_x[1])
         
         # Debug: Check reference waypoint and distance
         if self.prev_waypoints_idx < self.ref_path.shape[0]:
@@ -146,7 +159,7 @@ class MPPIController:
                              math.degrees(ref_point[2]), ref_point[3])
                 
                 # Current state
-                rospy.loginfo("Actual:            x=%.2f, y=%.2f, yaw=%.3f (%.1f°), v=%.2f",
+                rospy.loginfo("Actual: x=%.2f, y=%.2f, yaw=%.3f (%.1f°), v=%.2f",
                              observed_x[0], observed_x[1], observed_x[2],
                              math.degrees(observed_x[2]), observed_x[3])
                 
@@ -160,17 +173,13 @@ class MPPIController:
                 # Calculate lateral error
                 e_lat = -np.sin(ref_point[2]) * e_x + np.cos(ref_point[2]) * e_y
                 
-                rospy.loginfo("Error:             ex=%.3f, ey=%.3f, e_lat=%.3f, e_yaw=%.1f°, ev=%.2f",
-                             e_x, e_y, e_lat, e_yaw, e_v)
-                rospy.loginfo("Distance to ref:   %.3f m", dist_to_ref)
+                rospy.loginfo("Error: e_lat=%.3f, e_yaw=%.1f°, ev=%.2f", e_lat, e_yaw, e_v)
                 
                 # Estimate curvature at current reference point
                 kappa = self._estimate_curvature(self.prev_waypoints_idx, window=2)
                 steer_ref_rad = np.arctan(self.wheel_base * kappa)
                 steer_ref_deg = math.degrees(steer_ref_rad)
                 max_steer_deg = math.degrees(self.max_steer_abs)
-                rospy.loginfo("Path curvature:    κ=%.4f, steer_ref=%.1f° (max=±%.1f°)", 
-                             kappa, steer_ref_deg, max_steer_deg)
 
         # Sample noise: epsilon ~ (K, T, dim_u)
         import time
@@ -502,39 +511,72 @@ class MPPIController:
             out = out[:, :, :-1]
         return out.squeeze(0).permute(1, 0)
 
-    def _update_nearest_waypoint_index(self, x, y):
+    def _update_reference_progress(self, x, y):
         """
-        Update nearest waypoint index - find globally nearest point
+        Update reference point based on arc length progress.
+        This prevents jumping between overlapping segments (e.g., parking maneuvers).
         """
-        SEARCH_LEN = 50  # Look ahead 50 points
-        
-        prev_idx = self.prev_waypoints_idx
-        n = self.ref_path.shape[0]
-        end_idx = min(prev_idx + SEARCH_LEN, n)
-        
-        if end_idx <= prev_idx:
+        if self.ref_path is None:
             return
+
+        # 1. 获取当前参考点附近的信息
+        idx = self.prev_waypoints_idx
+        # 防止越界
+        if idx >= self.ref_path.shape[0] - 1:
+            return
+
+        # 2. 计算车辆相对于当前参考点的投影前进量
+        # 向量: 参考点 -> 车辆
+        ref_point = self.ref_path[idx].cpu().numpy()
+        dx = x - ref_point[0]
+        dy = y - ref_point[1]
         
-        path_seg = self.ref_path[prev_idx:end_idx]
+        # 路径切线向量 (指向下一个点)
+        next_point = self.ref_path[idx+1].cpu().numpy()
+        tangent_x = next_point[0] - ref_point[0]
+        tangent_y = next_point[1] - ref_point[1]
         
-        # Calculate distances to all points in search window
-        dx = x - path_seg[:, 0]
-        dy = y - path_seg[:, 1]
-        d2 = dx**2 + dy**2
-        distances = torch.sqrt(d2)
+        # 归一化切线
+        seg_len = np.sqrt(tangent_x**2 + tangent_y**2)
+        if seg_len < 1e-6:
+            return
+            
+        tangent_x /= seg_len
+        tangent_y /= seg_len
         
-        # Find nearest point
-        min_idx = torch.argmin(d2).item()
-        min_dist = distances[min_idx].item()
+        # 投影: 车辆走了多少 (ds)
+        # ds = dot(vector_to_car, tangent)
+        ds = dx * tangent_x + dy * tangent_y
         
-        # Always update to nearest point
-        new_idx = prev_idx + min_idx
+        # 3. 更新累积弧长 (current_s_progress)
+        # 我们希望参考点紧跟车辆，但不超过车辆太多，也不落后太多
+        # 这里的逻辑是：如果车辆往前走了，参考点就跟进；
+        # 关键限制：参考点不能“倒退” (max)，且不能突变跳跃。
         
-        if new_idx != prev_idx:
-            if abs(new_idx - prev_idx) > 2:
-                rospy.loginfo("[MPPI] Waypoint jump: %d -> %d (dist=%.2f)", 
-                             prev_idx, new_idx, min_dist)
-            self.prev_waypoints_idx = new_idx
+        # 目标 s 是当前段起点 s + 投影距离
+        target_s = self.path_s[idx] + ds
+        
+        # 限制：只能向前推进，且不能一次推进过大（例如限幅 0.5m）防止跳变
+        # 同时也允许一点点回退修正（比如测量噪声），但在泊车换向时要小心
+        # 稳健做法：单调递增，取 max
+        self.current_s_progress = max(self.current_s_progress, target_s)
+        
+        # 4. 根据 current_s_progress 查找新的索引
+        # 在 path_s 数组中找到第一个大于 current_s_progress 的索引
+        # np.searchsorted 能够快速找到位置
+        new_idx = np.searchsorted(self.path_s, self.current_s_progress, side='right') - 1
+        new_idx = np.clip(new_idx, 0, self.ref_path.shape[0] - 1)
+        
+        # 5. 更新索引
+        if new_idx != self.prev_waypoints_idx:
+            # 增加一个保护：防止索引跳变过大（例如 > 5个点），这通常意味着出错了
+            if abs(new_idx - self.prev_waypoints_idx) < 20: 
+                self.prev_waypoints_idx = new_idx
+            else:
+                # 如果跳变太大，可能是闭环路或者异常，保持推进但不跳索引，或者只加1
+                self.prev_waypoints_idx += 1
+                self.prev_waypoints_idx = min(self.prev_waypoints_idx, self.ref_path.shape[0]-1)
+    
 
 
 class MPPIControlNode:

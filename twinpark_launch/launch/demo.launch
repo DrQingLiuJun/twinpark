@@ -70,23 +70,23 @@
        Runs in separate Python environment with PyTorch support
        Delay: 2 seconds (wait for Trajectory Server)
        ======================================================================== -->
-  <!-- <node name="vehicle_control_node" 
+  <node name="vehicle_control_node" 
         pkg="vehicle_control" 
-        type="control.py" 
+        type="mppi_control_v2_t.py" 
         output="$(arg output)"
         respawn="false"
         launch-prefix="bash -c 'sleep 2; $0 $@' ">
     <rosparam command="load" file="$(arg config_file)" />
-  </node> -->
+  </node>
 
-  <node name="mppi_control_node" 
+  <!-- <node name="mppi_control_node" 
         pkg="vehicle_control" 
         type="run_mppi_with_pytorch.sh" 
         output="$(arg output)"
         respawn="false"
         launch-prefix="bash -c 'sleep 2; $0 $@'" >
     <rosparam command="load" file="$(arg config_file)" />
-  </node>
+  </node> -->
 
   <!-- ========================================================================
        Visualization Node

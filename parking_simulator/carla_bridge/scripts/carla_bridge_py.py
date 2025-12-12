@@ -53,6 +53,11 @@ class CarlaBridgePy:
         # Connect to CARLA and spawn vehicle
         self.connect_carla()
         self.spawn_vehicle()
+
+        # Set the view
+        spectator = self.world.get_spectator()
+        bv_transform = carla.Transform(carla.Location(x=17, y=2, z=30), carla.Rotation(yaw=90, pitch=-90))
+        spectator.set_transform(bv_transform)
         
         rospy.loginfo("CARLA Bridge initialized successfully")
     
@@ -206,7 +211,7 @@ class CarlaBridgePy:
         # Convert to body frame velocity (always relative to vehicle orientation)
         # vx: forward velocity, vy: lateral velocity
         vx_ros = vx_carla * math.cos(yaw_carla_rad) + vy_carla * math.sin(yaw_carla_rad)
-        vy_ros = -vx_carla * math.sin(yaw_carla_rad) + vy_carla * math.cos(yaw_carla_rad)
+        vy_ros = vx_carla * math.sin(yaw_carla_rad) - vy_carla * math.cos(yaw_carla_rad)
         
         return x_ros, y_ros, yaw_ros, vx_ros, vy_ros
     

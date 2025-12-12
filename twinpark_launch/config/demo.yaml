@@ -133,7 +133,7 @@ vehicle_control:
 mppi_control_node:
   # MPPI Algorithm Parameters
   delta_t: 0.1              # Time step for prediction (s)
-  horizon_T: 10             # Prediction horizon steps (1.0s lookahead, balanced)
+  horizon_T: 20             # Prediction horizon steps (1.0s lookahead, balanced)
   num_samples_K: 500        # Number of sampled trajectories (reduced for speed)
   exploration: 0.25         # Exploration ratio (0-1) - increased for better reverse exploration
   lambda: 10.0              # Temperature parameter - lower for more aggressive optimization
@@ -147,8 +147,8 @@ mppi_control_node:
   # Stage cost: balanced weights for smooth path following
   # Terminal cost: emphasize accurate final position
   # Note: Increased velocity weight to ensure proper speed tracking in reverse
-  stage_cost_weight: [20.0, 8.0, 15.0]        # Stage cost weights [e_lat, yaw, v] - v increased
-  terminal_cost_weight: [40.0, 15.0, 10.0]    # Terminal cost weights [e_lat, yaw, v] - v increased
+  stage_cost_weight: [5.0, 80.0, 10.0, 5.0]       # Stage cost weights [e_lon, e_lat, e_yaw, e_v] - v increased
+  terminal_cost_weight: [10.0, 100.0, 20.0, 5.0]   # Terminal cost weights [e_lon, e_lat, e_yaw, e_v] - v increased
   
   # Vehicle Parameters
   wheelbase: 3.368          # Vehicle wheelbase (m)

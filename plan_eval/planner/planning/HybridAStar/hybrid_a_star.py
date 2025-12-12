@@ -446,80 +446,113 @@ def generate_trajectory(path):
     vel = np.zeros(1)
     num = len(path.x_list)
 
+    # 1. 识别换向点 (Cusps)
     for i in range(1, len(path.direction_list)):
         if path.direction_list[i] != path.direction_list[i-1]:
             index.append(i-1)
     index.append(len(path.direction_list)-1)
 
-    # 生成位置和速度的数组
-    for i in range(0,len(index)):
-        dir = np.power(-1, i) # -1 的 i 次方
+    # 2. 生成每一段的速度规划 (S-V Profile)
+    for i in range(0, len(index)):
+        dir = np.power(-1, i) 
         if not path.direction_list[0]:
             dir = -dir 
-        if i > 0:
-            s.append(dir * (index[i] - index[i-1]) * MOTION_RESOLUTION)
-            polynomial5_trajectory = velocity_planning(s[i], num, -0.2, 0, 0, 0, 0.3, 0.2)
-            pos = np.append(pos, polynomial5_trajectory[:,0]) # 将 polynomial5_trajectory 的第一列（即位置信息）附加到 pos 数组的末尾
-            vel = np.append(vel, polynomial5_trajectory[:,1])
-            # vel = np.delete(vel, index[i-1])
-            vel[-1] = 0 #有可能插值没插到终点，导致最后一个目标点速度不是0
+            
+        # 设定动力学限制
+        target_v = 0.5  # 期望巡航速度
+        target_a = 0.8  # 期望加速度
 
+        if i > 0:
+            # --- 换向段/中间段 ---
+            dist_val = (index[i] - index[i-1]) * MOTION_RESOLUTION
+            s.append(dir * dist_val)
+            
+            # 自适应速度限制：防止距离过短导致时间计算异常
+            v_reachable = np.sqrt(abs(dist_val) * target_a)
+            v_cal = min(target_v, v_reachable * 0.95)
+            
+            # vel_start=0, vel_end=0
+            polynomial5_trajectory = velocity_planning(s[i], num, 0, 0, 0, 0, v_cal, target_a)
+            
+            pos = np.append(pos, polynomial5_trajectory[:,0]) 
+            vel = np.append(vel, polynomial5_trajectory[:,1])
+            vel[-1] = 0 
             
         else:
-            s.append(dir * index[i] * XY_GRID_RESOLUTION * 1.5)
-            polynomial5_trajectory = velocity_planning(s[i], num, 0.3, 0, 0, 0, 1, 0.5)
+            # --- 起步段 ---
+            dist_val = index[i] * XY_GRID_RESOLUTION * 1.5
+            s.append(dir * dist_val)
+            
+            # 自适应速度限制
+            v_reachable = np.sqrt(abs(dist_val) * target_a)
+            v_cal = min(target_v, v_reachable * 0.95)
+
+            # vel_start=0
+            polynomial5_trajectory = velocity_planning(s[i], num, 0, 0, 0, 0, v_cal, target_a)
+            
             pos = np.append(pos, polynomial5_trajectory[:,0])
-            pos = np.delete(pos, 0) # 删除位置数组中的第一个元素。这是因为在计算完整轨迹后，第一个目标点已经在前一个子路径中计算过了，因此这里需要删除。
+            # pos = np.delete(pos, 0) 
 
             vel = np.append(vel, polynomial5_trajectory[:,1])
-            vel[-1] = 0 #有可能插值没插到终点，导致最后一个目标点速度不是0
-            vel = np.delete(vel, 0) 
+            vel[-1] = 0 
+            # vel = np.delete(vel, 0) 
 
             
     vel = list(vel)
     pos = list(pos)
 
+    # 3. 将 S-V 曲线重采样回路径点 (Resampling)
     for j in range(0, len(index)):
-        dir = np.power(-1, i)
+        dir = np.power(-1, j) # Simplified assumption, check logic if needed
         if not path.direction_list[0]:
-            dir = -dir 
+            dir = -dir
+
         if j == 0:
             pos1 = pos[0:num-1]
             vel1 = vel[0:num-1]
             if dir == -1:
-                pos1.reverse()
-                vel1.reverse()
+                pos1 = list(reversed(pos1))
+                vel1 = list(reversed(vel1))
             vel_final = np.zeros(1)
-            for i in range (1, index[j]+1):
-                dis = i * XY_GRID_RESOLUTION * 1.5 * dir
+            for k in range (1, index[j]+1): 
+                dis = k * XY_GRID_RESOLUTION * 1.5 * dir
                 index_pos = takeClosest(pos1, dis)
-                a1 = (dis - pos1[index_pos-1]) / (pos1[index_pos] - pos1[index_pos-1])
+                if index_pos == 0: index_pos = 1
+                denominator = pos1[index_pos] - pos1[index_pos-1]
+                if abs(denominator) < 1e-6: denominator = 1e-6 # Avoid div by zero
+                a1 = (dis - pos1[index_pos-1]) / denominator
                 vel_final = np.append(vel_final, vel1[index_pos-1] + (vel1[index_pos] - vel1[index_pos-1]) * a1)
-            vel_final[-1] = 0 #有可能插值没插到终点，导致最后一个目标点速度不是0
+            vel_final[-1] = 0 
         elif j > 0 and j != len(index)-1:
             pos1 = pos[j*num:(j+1)*num-1]
             vel1 = vel[j*num:(j+1)*num-1]
             if dir == -1:
-                pos1.reverse()
-                vel1.reverse()
-            for i in range(1, index[j]-index[j-1]+1):
-                dis = i * MOTION_RESOLUTION * 1 * dir
+                pos1 = list(reversed(pos1))
+                vel1 = list(reversed(vel1))
+            for k in range(1, index[j]-index[j-1]+1):
+                dis = k * MOTION_RESOLUTION * 1 * dir
                 index_pos = takeClosest(pos1, dis)
-                a2 = (dis - pos1[index_pos-1]) / (pos1[index_pos] - pos1[index_pos-1])
+                if index_pos == 0: index_pos = 1
+                denominator = pos1[index_pos] - pos1[index_pos-1]
+                if abs(denominator) < 1e-6: denominator = 1e-6
+                a2 = (dis - pos1[index_pos-1]) / denominator
                 vel_final = np.append(vel_final, vel1[index_pos-1] + (vel1[index_pos] - vel1[index_pos-1]) * a2)
-            vel_final[-1] = 0 #有可能插值没插到终点，导致最后一个目标点速度不是0
+            vel_final[-1] = 0 
         else:
             pos1 = pos[j*num:]
             vel1 = vel[j*num:]
             if dir == -1:
-                pos1.reverse()
-                vel1.reverse()
-            for i in range(1, index[j] -index[j-1]+1):
-                dis = i * MOTION_RESOLUTION * 1 * dir
+                pos1 = list(reversed(pos1))
+                vel1 = list(reversed(vel1))
+            for k in range(1, index[j] -index[j-1]+1):
+                dis = k * MOTION_RESOLUTION * 1 * dir
                 index_pos = takeClosest(pos1, dis)
-                a3 = (dis - pos1[index_pos-1]) / (pos1[index_pos] - pos1[index_pos-1])
+                if index_pos == 0: index_pos = 1
+                denominator = pos1[index_pos] - pos1[index_pos-1]
+                if abs(denominator) < 1e-6: denominator = 1e-6
+                a3 = (dis - pos1[index_pos-1]) / denominator
                 vel_final = np.append(vel_final, vel1[index_pos-1] + (vel1[index_pos] - vel1[index_pos-1]) * a3)
-            vel_final[-1] = 0 #有可能插值没插到终点，导致最后一个目标点速度不是0
+            vel_final[-1] = 0 
 
     vel_final = list(vel_final)
 
