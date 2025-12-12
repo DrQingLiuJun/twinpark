@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>pose_utils</name>
+  <version>0.1.0</version>
+  <description>Header-only utility library for pose and coordinate transformations</description>
+
+  <maintainer email="dev@twinpark.com">TwinPark Developer</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <export>
+  </export>
+</package>

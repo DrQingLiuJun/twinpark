@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>planner</name>
+  <version>0.1.0</version>
+  <description>Hybrid A* path planner with speed profiling</description>
+
+  <maintainer email="dev@twinpark.com">TwinPark Developer</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>roscpp</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>vehicle_msgs</depend>
+  <depend>pose_utils</depend>
+
+  <export>
+  </export>
+</package>

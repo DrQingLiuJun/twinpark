@@ -1,0 +1,114 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- ========================================================================
+       TwinPark System - Python Implementation Launch File
+       
+       This launch file specifically uses Python implementations of all nodes.
+       It's a convenience wrapper around demo_twinpark.launch with impl=py.
+       ======================================================================== -->
+
+  <!-- Arguments -->
+  <arg name="config_file" default="$(find twinpark_launch)/config/demo.yaml" 
+       doc="Path to unified configuration file"/>
+  <arg name="output" default="screen" 
+       doc="Output destination (screen or log)"/>
+  <arg name="use_rviz" default="false" 
+       doc="Launch RViz for visualization"/>
+  <arg name="time_scale" default="1.0" 
+       doc="Trajectory playback speed (1.0=normal, 0.5=slow, 2.0=fast)"/>
+  
+  <!-- Load unified configuration -->
+  <rosparam command="load" file="$(arg config_file)" />
+  
+  <!-- Override time_scale if specified -->
+  <param name="traj_server/time_scale" value="$(arg time_scale)" />
+  
+  <!-- ========================================================================
+       1. CARLA Bridge Node (Python)
+       ======================================================================== -->
+  <node name="carla_bridge_py" 
+        pkg="carla_bridge" 
+        type="carla_bridge_py.py" 
+        output="$(arg output)" 
+        required="true">
+    <rosparam command="load" file="$(arg config_file)" />
+  </node>
+  
+  <!-- Static TF for visualization -->
+  <node pkg="tf" type="static_transform_publisher" name="world_to_map" 
+        args="0 0 0 0 0 0 world map 100" />
+  
+  <!-- ========================================================================
+       2. Planner Node (Python)
+       Delay: 2 seconds (wait for CARLA Bridge)
+       ======================================================================== -->
+  <node name="planner_node" 
+        pkg="planner" 
+        type="planner.py" 
+        output="$(arg output)"
+        launch-prefix="bash -c 'sleep 0.5; $0 $@' ">
+    <!-- Load planner parameters from unified config -->
+    <rosparam command="load" file="$(arg config_file)" subst_value="true" />
+  </node>
+  
+  <!-- ========================================================================
+       3. Trajectory Server Node (Python)
+       Delay: 4 seconds (wait for Planner)
+       ======================================================================== -->
+  <node name="traj_server" 
+        pkg="traj_server" 
+        type="traj_server.py" 
+        output="$(arg output)" 
+        required="true"
+        launch-prefix="bash -c 'sleep 1.5; $0 $@' ">
+    <rosparam command="load" file="$(arg config_file)" />
+    <param name="time_scale" value="$(arg time_scale)" />
+  </node>
+  
+  <!-- ========================================================================
+       4. MPPI Control Node (Python with PyTorch)
+       Runs in separate Python environment with PyTorch support
+       Delay: 2 seconds (wait for Trajectory Server)
+       ======================================================================== -->
+  <!-- <node name="vehicle_control_node" 
+        pkg="vehicle_control" 
+        type="control.py" 
+        output="$(arg output)"
+        respawn="false"
+        launch-prefix="bash -c 'sleep 2; $0 $@' ">
+    <rosparam command="load" file="$(arg config_file)" />
+  </node> -->
+
+  <node name="mppi_control_node" 
+        pkg="vehicle_control" 
+        type="run_mppi_with_pytorch.sh" 
+        output="$(arg output)"
+        respawn="false"
+        launch-prefix="bash -c 'sleep 2; $0 $@'" >
+    <rosparam command="load" file="$(arg config_file)" />
+  </node>
+
+  <!-- ========================================================================
+       Visualization Node
+       Publishes markers and paths for RViz
+       ======================================================================== -->
+  <node name="visualization_node" 
+        pkg="twinpark_launch" 
+        type="visualization_node.py" 
+        output="$(arg output)"
+        launch-prefix="bash -c 'sleep 1; $0 $@' ">
+    <rosparam command="load" file="$(arg config_file)" />
+  </node>
+  
+  <!-- ========================================================================
+       RViz Visualization
+       ======================================================================== -->
+  <node name="rviz" 
+        pkg="rviz" 
+        type="rviz" 
+        args="-d $(find twinpark_launch)/config/twinpark.rviz" 
+        if="$(arg use_rviz)"
+        required="false"
+        launch-prefix="bash -c 'sleep 7; $0 $@' "/>
+
+</launch>

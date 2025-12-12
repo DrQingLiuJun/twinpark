@@ -1,0 +1,159 @@
+# TwinPark System Unified Configuration
+# This file contains all parameters for the complete system
+
+# ============================================================================
+# CARLA Bridge Configuration
+# ============================================================================
+carla:
+  # CARLA server connection
+  host: "localhost"
+  port: 2000
+  timeout: 10.0
+  
+  # Vehicle selection filter
+  vehicle_filter: "haut"
+  
+  # Vehicle spawn point (ROS coordinates)
+  # ROS frame: yaw=0° points right (+X), yaw=90° points up (+Y)
+  spawn_point:
+    x: -18.3      # ROS X coordinate
+    y: -5.68     # ROS Y coordinate  
+    z: 0.05
+    yaw: 90.0     # degrees in ROS frame (vehicle should point up/+Y for forward parking)
+  
+  # Coordinate transformation (CARLA -> ROS)
+  coordinate_transform:
+    x_scale: -1.0      # CARLA X -> ROS -X
+    y_scale: 1.0       # CARLA Y -> ROS Y
+    yaw_offset: 180.0    # No offset, just mirror yaw
+  
+  # Vehicle parameters
+  wheelbase: 3.368  # meters
+  
+  # Publishing rate
+  publish_rate: 50.0  # Hz
+
+# ============================================================================
+# Planner Configuration (loaded into /planner_node namespace)
+# ============================================================================
+planner_node:
+  # Hybrid A* Parameters
+  xy_resolution: 0.755      # Grid resolution in meters
+  yaw_resolution: 10.0      # Angle resolution in degrees
+  
+  # Vehicle Geometry
+  wheelbase: 3.368          # Wheelbase in meters
+  width: 1.8                # Vehicle width in meters
+  length: 4.5               # Vehicle length in meters
+  max_steer: 45.0           # Maximum steering angle in degrees
+  min_turn_radius: 5.0      # Minimum turning radius in meters
+  
+  # Speed Planning Parameters
+  max_speed: 1.0            # Maximum speed in m/s
+  max_accel: 1.0            # Maximum acceleration in m/s²
+  max_jerk: 0.5             # Maximum jerk in m/s³
+  curvature_speed_factor: 0.5  # Factor for speed reduction based on curvature
+  
+  # Goal Configuration (ROS coordinates)
+  goal_x: -25.8             # Goal X position in meters (ROS coordinate)
+  goal_y: 0.1               # Goal Y position in meters (ROS coordinate)
+  goal_yaw: 0.0             # Goal yaw angle in degrees (pointing right/east in ROS frame)
+  
+  # 车位L4 -25.8 0.1 180.0
+
+
+  # Auto Planning
+  auto_plan: true           # Automatically plan when vehicle state is received
+  
+  # Obstacle Map Configuration
+  obstacles:
+    x_bounds: [9.476, 27.401]    # X bounds of the environment
+    y_bounds: [-10.101, 14.377]  # Y bounds of the environment
+    
+    # Parking slots (for reference, not used as obstacles)
+    parking_slots:
+      - row: 1
+        col: 3
+        x: 23.8 #换的问题，生成carla的车辆时，使用的是carla坐标系，
+        y: 0.1
+        yaw: 180.0
+      - row: 2
+        col: 3
+        x: 12.8
+        y: 0.1
+        yaw: 0.0
+
+# ============================================================================
+# Trajectory Server Configuration
+# ============================================================================
+traj_server:
+  # Publishing frequency (Hz)
+  publish_rate: 50.0
+  
+  # Time scaling factor
+  # 1.0 = normal speed, 0.5 = slow motion, 2.0 = fast forward
+  time_scale: 1.0
+  
+  # Interpolation method
+  interpolation_method: "linear"
+  
+  # Loop trajectory
+  loop_trajectory: false
+
+# ============================================================================
+# Vehicle Control Configuration
+# ============================================================================
+vehicle_control:
+  # Backstepping Controller Parameters
+  k1: 4.0    # Longitudinal error gain (increased to reduce tracking lag)
+  k2: 2.5    # Lateral error gain (moderate to balance response)
+  k3: 2.0    # Heading error gain (moderate to avoid excessive steering)
+  
+  # PID Speed Controller Parameters
+  pid:
+    kp: 2.0           # Proportional gain (increased for faster speed response)
+    ki: 0.2           # Integral gain (increased to eliminate steady-state error)
+    kd: 0.3           # Derivative gain (increased for better damping)
+    max_integral: 1.0 # Anti-windup limit
+  
+  # Control Limits
+  max_throttle: 1.0       # Maximum throttle [0, 1]
+  max_brake: 1.0          # Maximum brake [0, 1]
+  max_steer: 1.0          # Maximum steering [-1, 1]
+  
+  # Vehicle Parameters
+  wheelbase: 3.368        # Vehicle wheelbase (m)
+  
+  # Control Rate
+  publish_rate: 50.0      # Control loop frequency (Hz)
+
+# ============================================================================
+# MPPI Control Configuration
+# ============================================================================
+mppi_control_node:
+  # MPPI Algorithm Parameters
+  delta_t: 0.1              # Time step for prediction (s)
+  horizon_T: 10             # Prediction horizon steps (1.0s lookahead, balanced)
+  num_samples_K: 500        # Number of sampled trajectories (reduced for speed)
+  exploration: 0.25         # Exploration ratio (0-1) - increased for better reverse exploration
+  lambda: 10.0              # Temperature parameter - lower for more aggressive optimization
+  alpha: 0.80               # Smoothing parameter - lower for faster response
+  
+  # Noise Parameters (Covariance)
+  sigma_steer: 0.6          # Steering noise std dev (rad) - increased for aggressive turning
+  sigma_accel: 1.2          # Acceleration noise std dev (m/s²) - increased for better reverse exploration
+  
+  # Cost Function Weights [lateral_error, yaw, v]
+  # Stage cost: balanced weights for smooth path following
+  # Terminal cost: emphasize accurate final position
+  # Note: Increased velocity weight to ensure proper speed tracking in reverse
+  stage_cost_weight: [20.0, 8.0, 15.0]        # Stage cost weights [e_lat, yaw, v] - v increased
+  terminal_cost_weight: [40.0, 15.0, 10.0]    # Terminal cost weights [e_lat, yaw, v] - v increased
+  
+  # Vehicle Parameters
+  wheelbase: 3.368          # Vehicle wheelbase (m)
+  max_steer: 45.0           # Maximum steering angle (degrees)
+  max_accel: 2.0            # Maximum acceleration (m/s²)
+  
+  # Control Rate
+  publish_rate: 20.0        # Control loop frequency (Hz)

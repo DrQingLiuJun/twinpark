@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Arguments -->
+  <arg name="config_file" default="$(find carla_bridge)/config/carla.yaml" />
+  <arg name="output" default="screen" />
+  
+  <!-- CARLA Bridge Node (Python) -->
+  <node name="carla_bridge_py" pkg="carla_bridge" type="carla_bridge_py.py" output="$(arg output)" required="true">
+    <!-- Load configuration -->
+    <rosparam command="load" file="$(arg config_file)" />
+  </node>
+  
+  <!-- Optional: Static TF for visualization -->
+  <node pkg="tf" type="static_transform_publisher" name="world_to_map" 
+        args="0 0 0 0 0 0 world map 100" />
+
+</launch>

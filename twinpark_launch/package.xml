@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>twinpark_launch</name>
+  <version>0.1.0</version>
+  <description>Launch files and configurations for TwinPark system</description>
+
+  <maintainer email="dev@twinpark.com">TwinPark Developer</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <exec_depend>carla_bridge</exec_depend>
+  <exec_depend>planner</exec_depend>
+  <exec_depend>traj_server</exec_depend>
+  <exec_depend>vehicle_control</exec_depend>
+  <exec_depend>rollout</exec_depend>
+
+  <export>
+  </export>
+</package>

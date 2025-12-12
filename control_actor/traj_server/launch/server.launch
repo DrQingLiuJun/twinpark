@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Arguments -->
+  <arg name="config_file" default="$(find traj_server)/config/server.yaml" 
+       doc="Path to trajectory server configuration file"/>
+  <arg name="publish_rate" default="50.0" 
+       doc="Reference state publishing frequency (Hz)"/>
+  <arg name="time_scale" default="1.0" 
+       doc="Time scaling factor (1.0=normal, 0.5=slow, 2.0=fast)"/>
+  <arg name="loop_trajectory" default="false" 
+       doc="Whether to loop the trajectory continuously"/>
+  <arg name="output" default="screen" 
+       doc="Output destination (screen or log)"/>
+
+  <!-- Trajectory Server Node -->
+  <node name="traj_server" pkg="traj_server" type="traj_server.py" 
+        output="$(arg output)" required="true">
+    
+    <!-- Load configuration from YAML file -->
+    <rosparam command="load" file="$(arg config_file)" />
+    
+    <!-- Override parameters from command line arguments -->
+    <param name="publish_rate" value="$(arg publish_rate)" />
+    <param name="time_scale" value="$(arg time_scale)" />
+    <param name="loop_trajectory" value="$(arg loop_trajectory)" />
+    
+    <!-- Remap topics if needed -->
+    <!-- <remap from="/planned_trajectory" to="/custom_trajectory" /> -->
+    <!-- <remap from="/reference_state" to="/custom_reference" /> -->
+  </node>
+
+  <!-- Optional: Launch RViz for visualization -->
+  <!-- <node name="rviz" pkg="rviz" type="rviz" args="-d $(find traj_server)/rviz/traj_server.rviz" if="$(arg use_rviz)"/> -->
+
+</launch>

@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Planner Node Launch File -->
+  
+  <!-- Arguments -->
+  <arg name="config_file" default="$(find planner)/config/planner.yaml" />
+  <arg name="output" default="screen" />
+  
+  <!-- Planner Node -->
+  <node name="planner_node" pkg="planner" type="planner.py" output="$(arg output)">
+    <!-- Load parameters from YAML file -->
+    <rosparam command="load" file="$(arg config_file)" />
+  </node>
+  
+  <!-- Optional: RViz for visualization -->
+  <!-- Uncomment to launch RViz with planner visualization -->
+  <!--
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find planner)/config/planner.rviz" />
+  -->
+  
+</launch>
