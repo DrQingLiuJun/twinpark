@@ -72,7 +72,7 @@
        ======================================================================== -->
   <node name="vehicle_control_node" 
         pkg="vehicle_control" 
-        type="mppi_control_v2_t.py" 
+        type="mppi_control.py" 
         output="$(arg output)"
         respawn="false"
         launch-prefix="bash -c 'sleep 2; $0 $@' ">

@@ -359,8 +359,8 @@ class CarlaBridgePy:
                 rospy.loginfo("Trajectory visualization enabled in CARLA")
                 rospy.loginfo(f"  Start (ROS): ({x_list[0]:.2f}, {y_list[0]:.2f})")
                 rospy.loginfo(f"  End (ROS): ({x_list[-1]:.2f}, {y_list[-1]:.2f})")
-                rospy.loginfo(f"  Start (CARLA): ({-x_list[0]:.2f}, {y_list[0]:.2f})")
-                rospy.loginfo(f"  End (CARLA): ({-x_list[-1]:.2f}, {y_list[-1]:.2f})")
+                # rospy.loginfo(f"  Start (CARLA): ({-x_list[0]:.2f}, {y_list[0]:.2f})")
+                # rospy.loginfo(f"  End (CARLA): ({-x_list[-1]:.2f}, {y_list[-1]:.2f})")
                 self.trajectory_drawn = True
                 
         except Exception as e:
@@ -381,12 +381,12 @@ class CarlaBridgePy:
                 start = carla.Location(
                     x=-x_ros_start,    # ROS to CARLA: negate x
                     y=y_ros_start,     # ROS to CARLA: keep y
-                    z=0.5              # Height above ground for visibility
+                    z=0.6              # Height above ground for visibility
                 )
                 end = carla.Location(
                     x=-x_ros_end,
                     y=y_ros_end,
-                    z=0.5
+                    z=0.6
                 )
                 
                 # Draw blue line with same thickness as reference trajectory

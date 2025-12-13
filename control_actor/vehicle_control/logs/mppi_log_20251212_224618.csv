@@ -1,1 +1,0 @@
-timestamp,ref_x,ref_y,ref_yaw,ref_v,act_x,act_y,act_yaw,act_v,act_vx,act_vy,error_lon,error_lat,error_yaw,error_v,cmd_steer,cmd_accel,cmd_gear,comp_time_ms,min_cost,mean_cost

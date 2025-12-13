@@ -437,130 +437,142 @@ def calculate_angular_velocity(yaw_list, timestep):
     
     return omega_list
 
+def generate_trapezoidal_profile(dist, n_points, v_max, a_max):
+    """
+    生成梯形速度曲线（加速-匀速-减速）
+    :param dist: 该段的总距离 (带符号，用于确定方向)
+    :param n_points: 该段的点数 (用于离散化)
+    :param v_max: 目标巡航速度 (绝对值)
+    :param a_max: 最大加速度 (绝对值)
+    :return: 速度数组 (numpy array)
+    """
+    s_total = abs(dist)
+    direction = np.sign(dist) if dist != 0 else 1.0
+    
+    # 1. 计算达到 v_max 所需的加速距离
+    # v^2 - v0^2 = 2as => acc_dist = v_max^2 / (2*a)
+    acc_dist = (v_max**2) / (2 * a_max)
+    
+    # 2. 判断是否能达到最大速度
+    if s_total > 2 * acc_dist:
+        # 足够长，形成梯形 (Trapezoidal)
+        # 阶段: 加速 -> 匀速 -> 减速
+        cruise_dist = s_total - 2 * acc_dist
+        # 记录三个阶段的距离节点
+        d_acc_end = acc_dist
+        d_cruise_end = acc_dist + cruise_dist
+        peak_v = v_max
+    else:
+        # 距离太短，达不到 v_max，形成三角形 (Triangular)
+        # 此时加速一半距离，减速一半距离
+        d_acc_end = s_total / 2.0
+        d_cruise_end = s_total / 2.0 # 匀速段不存在
+        # 重新计算此时能达到的峰值速度 v = sqrt(2*a*s)
+        peak_v = np.sqrt(2 * a_max * d_acc_end)
+
+    vel_list = []
+    
+    # 3. 为每个点分配速度
+    # 假设点在路径上是均匀分布的，我们根据“当前走过的距离”来查表计算速度
+    for i in range(n_points):
+        # 当前点距离起点的距离
+        current_s = (i / float(n_points - 1)) * s_total if n_points > 1 else 0
+        
+        v_curr = 0.0
+        
+        if current_s <= d_acc_end:
+            # 加速段: v = sqrt(2 * a * s)
+            v_curr = np.sqrt(2 * a_max * current_s)
+        elif current_s <= d_cruise_end:
+            # 匀速段: v = peak_v
+            v_curr = peak_v
+        else:
+            # 减速段: 相当于反向加速
+            # 剩余距离
+            s_remain = s_total - current_s
+            # 防止浮点数误差导致负数
+            s_remain = max(0.0, s_remain)
+            v_curr = np.sqrt(2 * a_max * s_remain)
+            
+        vel_list.append(v_curr * direction)
+        
+    return np.array(vel_list)
+
 
 # 据给定的路径生成轨迹
 def generate_trajectory(path):
-    
-    index, s = [], []
-    pos = np.zeros(1)
-    vel = np.zeros(1)
-    num = len(path.x_list)
-
-    # 1. 识别换向点 (Cusps)
+    index = []
+    # 1. 识别换向点
     for i in range(1, len(path.direction_list)):
         if path.direction_list[i] != path.direction_list[i-1]:
             index.append(i-1)
     index.append(len(path.direction_list)-1)
 
-    # 2. 生成每一段的速度规划 (S-V Profile)
-    for i in range(0, len(index)):
-        dir = np.power(-1, i) 
-        if not path.direction_list[0]:
-            dir = -dir 
-            
-        # 设定动力学限制
-        target_v = 0.5  # 期望巡航速度
-        target_a = 0.8  # 期望加速度
+    final_x = []
+    final_y = []
+    final_yaw = []
+    final_vel = []
+    final_omega = [] 
 
-        if i > 0:
-            # --- 换向段/中间段 ---
-            dist_val = (index[i] - index[i-1]) * MOTION_RESOLUTION
-            s.append(dir * dist_val)
-            
-            # 自适应速度限制：防止距离过短导致时间计算异常
-            v_reachable = np.sqrt(abs(dist_val) * target_a)
-            v_cal = min(target_v, v_reachable * 0.95)
-            
-            # vel_start=0, vel_end=0
-            polynomial5_trajectory = velocity_planning(s[i], num, 0, 0, 0, 0, v_cal, target_a)
-            
-            pos = np.append(pos, polynomial5_trajectory[:,0]) 
-            vel = np.append(vel, polynomial5_trajectory[:,1])
-            vel[-1] = 0 
-            
-        else:
-            # --- 起步段 ---
-            dist_val = index[i] * XY_GRID_RESOLUTION * 1.5
-            s.append(dir * dist_val)
-            
-            # 自适应速度限制
-            v_reachable = np.sqrt(abs(dist_val) * target_a)
-            v_cal = min(target_v, v_reachable * 0.95)
-
-            # vel_start=0
-            polynomial5_trajectory = velocity_planning(s[i], num, 0, 0, 0, 0, v_cal, target_a)
-            
-            pos = np.append(pos, polynomial5_trajectory[:,0])
-            # pos = np.delete(pos, 0) 
-
-            vel = np.append(vel, polynomial5_trajectory[:,1])
-            vel[-1] = 0 
-            # vel = np.delete(vel, 0) 
-
-            
-    vel = list(vel)
-    pos = list(pos)
-
-    # 3. 将 S-V 曲线重采样回路径点 (Resampling)
+    # 遍历每一段
     for j in range(0, len(index)):
-        dir = np.power(-1, j) # Simplified assumption, check logic if needed
+        # 1. 确定当前段的方向
+        dir = np.power(-1, j) 
         if not path.direction_list[0]:
             dir = -dir
-
+            
+        # 2. 确定当前段的起止索引
         if j == 0:
-            pos1 = pos[0:num-1]
-            vel1 = vel[0:num-1]
-            if dir == -1:
-                pos1 = list(reversed(pos1))
-                vel1 = list(reversed(vel1))
-            vel_final = np.zeros(1)
-            for k in range (1, index[j]+1): 
-                dis = k * XY_GRID_RESOLUTION * 1.5 * dir
-                index_pos = takeClosest(pos1, dis)
-                if index_pos == 0: index_pos = 1
-                denominator = pos1[index_pos] - pos1[index_pos-1]
-                if abs(denominator) < 1e-6: denominator = 1e-6 # Avoid div by zero
-                a1 = (dis - pos1[index_pos-1]) / denominator
-                vel_final = np.append(vel_final, vel1[index_pos-1] + (vel1[index_pos] - vel1[index_pos-1]) * a1)
-            vel_final[-1] = 0 
-        elif j > 0 and j != len(index)-1:
-            pos1 = pos[j*num:(j+1)*num-1]
-            vel1 = vel[j*num:(j+1)*num-1]
-            if dir == -1:
-                pos1 = list(reversed(pos1))
-                vel1 = list(reversed(vel1))
-            for k in range(1, index[j]-index[j-1]+1):
-                dis = k * MOTION_RESOLUTION * 1 * dir
-                index_pos = takeClosest(pos1, dis)
-                if index_pos == 0: index_pos = 1
-                denominator = pos1[index_pos] - pos1[index_pos-1]
-                if abs(denominator) < 1e-6: denominator = 1e-6
-                a2 = (dis - pos1[index_pos-1]) / denominator
-                vel_final = np.append(vel_final, vel1[index_pos-1] + (vel1[index_pos] - vel1[index_pos-1]) * a2)
-            vel_final[-1] = 0 
+            start_idx = 0
+            end_idx = index[j]
         else:
-            pos1 = pos[j*num:]
-            vel1 = vel[j*num:]
-            if dir == -1:
-                pos1 = list(reversed(pos1))
-                vel1 = list(reversed(vel1))
-            for k in range(1, index[j] -index[j-1]+1):
-                dis = k * MOTION_RESOLUTION * 1 * dir
-                index_pos = takeClosest(pos1, dis)
-                if index_pos == 0: index_pos = 1
-                denominator = pos1[index_pos] - pos1[index_pos-1]
-                if abs(denominator) < 1e-6: denominator = 1e-6
-                a3 = (dis - pos1[index_pos-1]) / denominator
-                vel_final = np.append(vel_final, vel1[index_pos-1] + (vel1[index_pos] - vel1[index_pos-1]) * a3)
-            vel_final[-1] = 0 
+            start_idx = index[j-1] + 1 
+            end_idx = index[j]
+            
+        # 3. 提取当前段的几何路径
+        seg_x = path.x_list[start_idx : end_idx+1]
+        seg_y = path.y_list[start_idx : end_idx+1]
+        seg_yaw = path.yaw_list[start_idx : end_idx+1]
+        
+        # 4. 生成速度规划 (修改部分)
+        if j == 0:
+             # 起步段计算逻辑 (按你原来的逻辑)
+             dist = index[j] * XY_GRID_RESOLUTION * 1.5 * dir
+        else:
+             dist = (index[j] - index[j-1]) * MOTION_RESOLUTION * dir
+             
+        n_points = len(seg_x)
+        target_v = 0.5  # 目标巡航速度
+        target_a = 0.05  # 加速度
 
-    vel_final = list(vel_final)
+        # === 核心修改：使用梯形生成器代替 velocity_planning ===
+        seg_vel = generate_trapezoidal_profile(dist, n_points, target_v, target_a)
+        # =================================================
+        
+        # 5. 在倒车段开始前插入停顿 (Stop Padding)
+        if j > 0: 
+            STOP_FRAMES = 20 # 停 1 秒
+            
+            stop_x = [seg_x[0]] * STOP_FRAMES
+            stop_y = [seg_y[0]] * STOP_FRAMES
+            stop_yaw = [seg_yaw[0]] * STOP_FRAMES
+            stop_vel = [0.0] * STOP_FRAMES
+            
+            final_x.extend(stop_x)
+            final_y.extend(stop_y)
+            final_yaw.extend(stop_yaw)
+            final_vel.extend(stop_vel)
+            
+        # 6. 添加当前运动段
+        final_x.extend(seg_x)
+        final_y.extend(seg_y)
+        final_yaw.extend(seg_yaw)
+        final_vel.extend(seg_vel)
 
-    omega_list = calculate_angular_velocity(path.yaw_list, 0.1)
+    # 构建 omega
+    final_omega = calculate_angular_velocity(final_yaw, 0.1)
     
-    trajactory = Trajactory(path.x_list, path.y_list, path.yaw_list, vel_final, omega_list)
-
-    return trajactory
+    return Trajactory(final_x, final_y, final_yaw, final_vel, final_omega)
 
 # 将轨迹写入文本文件中
 def WriteMap(trajactory):

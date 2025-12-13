@@ -132,28 +132,28 @@ vehicle_control:
 # ============================================================================
 mppi_control_node:
   # MPPI Algorithm Parameters
-  delta_t: 0.1              # Time step for prediction (s)
-  horizon_T: 20             # Prediction horizon steps (1.0s lookahead, balanced)
+  delta_t: 0.05              # Time step for prediction (s)
+  horizon_T: 40             # Prediction horizon steps (1.0s lookahead, balanced)
   num_samples_K: 500        # Number of sampled trajectories (reduced for speed)
-  exploration: 0.25         # Exploration ratio (0-1) - increased for better reverse exploration
-  lambda: 10.0              # Temperature parameter - lower for more aggressive optimization
-  alpha: 0.80               # Smoothing parameter - lower for faster response
+  exploration: 0.1         # Exploration ratio (0-1) - increased for better reverse exploration
+  lambda: 40.0              # Temperature parameter - 适当放宽选择，利用更多样本的平均值来平滑输出
+  alpha: 0.6               # 平滑系数，遵循上一步控制量的程度，让控制器对当前的误差反应更灵敏。
   
   # Noise Parameters (Covariance)
-  sigma_steer: 0.6          # Steering noise std dev (rad) - increased for aggressive turning
-  sigma_accel: 1.2          # Acceleration noise std dev (m/s²) - increased for better reverse exploration
+  sigma_steer: 0.35          # Steering noise std dev (rad) - 扩大搜索范围，让控制器敢于尝试大角度转向。
+  sigma_accel: 0.1          # Acceleration noise std dev (m/s²) - increased for better reverse exploration
   
   # Cost Function Weights [lateral_error, yaw, v]
   # Stage cost: balanced weights for smooth path following
   # Terminal cost: emphasize accurate final position
   # Note: Increased velocity weight to ensure proper speed tracking in reverse
-  stage_cost_weight: [5.0, 80.0, 10.0, 5.0]       # Stage cost weights [e_lon, e_lat, e_yaw, e_v] - v increased
-  terminal_cost_weight: [10.0, 100.0, 20.0, 5.0]   # Terminal cost weights [e_lon, e_lat, e_yaw, e_v] - v increased
+  stage_cost_weight: [30.0, 80.0, 80.0, 0.0]      # Stage cost weights [e_lon, e_lat, e_yaw, e_v] - v increased
+  terminal_cost_weight: [50.0, 100.0, 80.0, 0.0]   # Terminal cost weights [e_lon, e_lat, e_yaw, e_v] - v increased
   
   # Vehicle Parameters
   wheelbase: 3.368          # Vehicle wheelbase (m)
   max_steer: 45.0           # Maximum steering angle (degrees)
-  max_accel: 2.0            # Maximum acceleration (m/s²)
+  max_accel: 0.8            # Maximum acceleration (m/s²)
   
   # Control Rate
   publish_rate: 20.0        # Control loop frequency (Hz)
