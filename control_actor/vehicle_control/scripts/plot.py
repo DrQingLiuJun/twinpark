@@ -26,7 +26,7 @@ COLORS = {
 }
 
 # 文件路径 (请修改为你本地的实际路径)
-FILE_PATH = r'/home/user/dynamic_map/src/twinpark/control_actor/vehicle_control/logs/mppi_log_20251215_105649.csv'
+FILE_PATH = r'/home/user/dynamic_map/src/twinpark/control_actor/vehicle_control/logs/mppi_log_20251215_122447.csv'
 
 # %% 1. 数据读取与处理
 def load_data(file_path):
