@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Tuple
 
 from vehicle_msgs.msg import VehicleState, ControlCmd, Trajectory
+from std_msgs.msg import Float32MultiArray
 
 
 class MPPIController:
@@ -358,11 +359,17 @@ class MPPIControlNode:
         )
         
         self.current_state = None
-        self.trajectory_received = False
+        self.catch_traj = False
+        self.catch_phy = False
+
+        # Buffer for physical car data
+        self.phy_state_data = [0.0] * 20 # 20 floats
         
         self.control_pub = rospy.Publisher('/control_cmd', ControlCmd, queue_size=10)
+
         self.state_sub = rospy.Subscriber('/vehicle_state', VehicleState, self.state_callback)
         self.planned_traj_sub = rospy.Subscriber('/planned_trajectory', Trajectory, self.trajectory_callback)
+        self.phy_state_sub = rospy.Subscriber('/xtark/phy_state', Float32MultiArray, self.phy_state_callback)
         
         self.control_rate = rospy.Rate(self.publish_rate)
         self._init_csv_logger()
@@ -374,11 +381,21 @@ class MPPIControlNode:
             os.makedirs(log_dir)
         timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.csv_filename = os.path.join(log_dir, f'mppi_log_{timestamp_str}.csv')
+
+        # Combined Header
         self.csv_header = [
+            # 1. Virtual Car & Reference (Existing 24 cols)
             'timestamp', 'ref_x', 'ref_y', 'ref_yaw', 'ref_v', 'ref_w',
             'vir_x', 'vir_y', 'vir_yaw', 'vir_v', 'vir_vx', 'vir_vy', 'vir_w',
             'e_Vx', 'e_Vy', 'e_Vyaw', 'e_Vv', 'e_Vw',
-            'u_Vsteer', 'u_Vaccel', 'cmd_gear', 'comp_time_ms', 'min_cost', 'mean_cost'
+            'u_Vsteer', 'u_Vaccel', 'cmd_gear', 'comp_time_ms', 'min_cost', 'mean_cost',
+            
+            # 2. Physical Car (New 20 cols)
+            'ref_Px', 'ref_Py', 'ref_Pyaw', 'ref_Pv', 'ref_Pw',
+            'phy_x', 'phy_y', 'phy_yaw', 'phy_v', 'phy_w',
+            'e_Px', 'e_Py', 'e_Pyaw', 'e_Pv', 'e_Pw',
+            'u_Pv', 'u_Pw',
+            'phy_v_hat', 'phy_f_hat', 'phy_tau'
         ]
         with open(self.csv_filename, 'w', newline='') as f:
             writer = csv.writer(f)
@@ -415,11 +432,16 @@ class MPPIControlNode:
         self.current_state = msg
     
     def trajectory_callback(self, msg):
+        self.catch_traj = True
         self.mppi.set_reference_path(msg)
-        self.trajectory_received = True
+        
+    
+    def phy_state_callback(self, msg):
+        self.catch_phy = True
+        self.phy_state_data = msg.data[:20] # Take first 20 just in case
     
     def compute_control_cmd(self):
-        if self.current_state is None or not self.trajectory_received:
+        if self.current_state is None or not self.catch_traj:
             return None
         
         observed_x = np.array([
@@ -509,27 +531,37 @@ class MPPIControlNode:
             E_Vx = ref_x - vir_x
             E_Vy = ref_y - vir_y
             
-            # --- 修正日志部分：使用实际车辆Yaw计算Body Error ---
+            # 使用实际车辆Yaw计算Body Error ---
             e_Vx = np.cos(vir_yaw) * E_Vx + np.sin(vir_yaw) * E_Vy
             e_Vy = -np.sin(vir_yaw) * E_Vx + np.cos(vir_yaw) * E_Vy
             e_Vyaw = np.arctan2(np.sin(ref_yaw - observed_x[2]), np.cos(ref_yaw - observed_x[2]))
             e_Vv = ref_v - vir_vx
             e_Vw = ref_w - vir_w
             
-            row = [
+            # 1. Virtual Car Data (First 24 cols)
+            row_vir = [
                 rospy.Time.now().to_sec(),
                 ref_x, ref_y, ref_yaw, ref_v, ref_w,
                 vir_x, vir_y, vir_yaw, vir_v, vir_vx, vir_vy, vir_w,
                 e_Vx, e_Vy, e_Vyaw, e_Vv, e_Vw,
                 u_Vsteer, u_Vaccel, target_gear, comp_time, min_cost, mean_cost
             ]
+
+            # 2. Physical Car Data (Appended 20 cols)
+            row_phy = self.phy_state_data
+
+            if not self.catch_phy:
+                rospy.logwarn_throttle(5.0, f"[CSV] No physical vehicle data received.")
+
+            # Combine
+            full_row = row_vir + list(row_phy)
             
             with open(self.csv_filename, 'a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(row)
+                writer.writerow(full_row)
                 
         except Exception as e:
-            pass
+            rospy.logwarn_throttle(5.0, f"[MPPI] CSV Logging Error: {e}")
     
     def run(self):
         rospy.loginfo(f"Starting MPPI control loop at {self.publish_rate} Hz")

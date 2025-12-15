@@ -418,14 +418,7 @@ class CarlaBridgePy:
             # Note: Negated to match coordinate system transformation
             ros_steer = float(max(-1.0, min(1.0, self.current_control.steer)))
             control.steer = -1 * ros_steer
-            
-            # Debug steering
-            if not hasattr(self, '_steer_apply_counter'):
-                self._steer_apply_counter = 0
-            self._steer_apply_counter += 1
-            if self._steer_apply_counter % 100 == 0:
-                rospy.loginfo(f"[Bridge] ROS steer: {ros_steer:.3f} -> CARLA steer: {control.steer:.3f}")
-            
+                      
             # Set gear and reverse
             control.manual_gear_shift = True
             if self.current_control.reverse:
