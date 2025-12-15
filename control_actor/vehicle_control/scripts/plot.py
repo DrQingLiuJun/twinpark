@@ -5,8 +5,9 @@ from matplotlib import rcParams
 import os
 
 # %% 0. 全局设置与颜色定义
-# 设置全局字体为 Arial，与 MATLAB 保持一致
-rcParams['font.family'] = 'Arial'
+# 设置全局字体为 Arial
+rcParams['font.family'] = 'sans-serif'
+rcParams['font.sans-serif'] = ['Arial']
 rcParams['mathtext.fontset'] = 'cm'  # 使用 Computer Modern 渲染数学公式
 rcParams['axes.unicode_minus'] = False # 解决负号显示问题
 
@@ -25,7 +26,7 @@ COLORS = {
 }
 
 # 文件路径 (请修改为你本地的实际路径)
-FILE_PATH = r'/home/user/dynamic_map/src/twinpark/control_actor/vehicle_control/logs/mppi_log_20251213_201044.csv'
+FILE_PATH = r'/home/user/dynamic_map/src/twinpark/control_actor/vehicle_control/logs/mppi_log_20251215_105649.csv'
 
 # %% 1. 数据读取与处理
 def load_data(file_path):
@@ -41,6 +42,11 @@ def load_data(file_path):
         data['steer'] = np.sin(np.linspace(0, 20, N)) * 0.3
         data['accel'] = np.cos(np.linspace(0, 20, N)) * 0.5
         data['ref_v'] = np.abs(np.sin(np.linspace(0, 10, N)))
+        # 模拟角速度
+        data['ref_w'] = np.cos(np.linspace(0, 10, N)) * 0.5
+        data['act_w'] = data['ref_w'] + np.random.normal(0, 0.05, N)
+        data['e_w'] = data['ref_w'] - data['act_w']
+        
         data['vir_v'] = data['ref_v'] * 0.95
         data['vir_vx'] = data['vir_v']
         data['vir_vy'] = np.zeros(N)
@@ -58,49 +64,55 @@ def load_data(file_path):
             'x_vir': data['x_vir'].values, 'y_vir': data['y_vir'].values,
             'vir_steer': data['steer'].values, 'vir_accel': data['accel'].values,
             'ref_v': data['ref_v'].values, 'vir_v': data['vir_v'].values,
+            'ref_w': data['ref_w'].values, 'act_w': data['act_w'].values, # NEW
             'vir_vx': data['vir_vx'].values, 'vir_vy': data['vir_vy'].values,
             'e_Vx': data['ex'].values, 'e_Vy': data['ey'].values, 'e_Vth': data['eth'].values, 'e_Vv': data['ev'].values,
+            'e_Vw': data['e_w'].values, # NEW
             'comp_time_ms': data['comp_time'].values,
             'min_cost': data['min_cost'].values, 'mean_cost': data['mean_cost'].values
         }
     else:
         try:
             df = pd.read_csv(file_path)
-            # 检查是否包含表头
-            if 'min_cost' in df.columns:
-                 raw = {
-                    'x_ref': df['ref_x'].values, 'y_ref': df['ref_y'].values,
-                    'x_vir': df['act_x'].values, 'y_vir': df['act_y'].values,
-                    'ref_v': df['ref_v'].values, 'vir_v': df['act_v'].values,
-                    'vir_vx': df['act_vx'].values, 'vir_vy': df['act_vy'].values,
-                    'e_Vx': df['error_lon'].values, 'e_Vy': df['error_lat'].values,
-                    'e_Vth': df['error_yaw'].values, 'e_Vv': df['error_v'].values,
-                    'vir_steer': df['cmd_steer'].values, 'vir_accel': df['cmd_accel'].values,
-                    'comp_time_ms': df['comp_time_ms'].values,
-                    'min_cost': df['min_cost'].values, 'mean_cost': df['mean_cost'].values
-                }
-            else:
-                # 无表头模式，按用户提供的列顺序读取
-                df = pd.read_csv(file_path, skiprows=1, header=None)
-                raw = {
-                    'x_ref': df.iloc[:, 1].values, 
-                    'y_ref': df.iloc[:, 2].values,
-                    'x_vir': df.iloc[:, 5].values,
-                    'y_vir': df.iloc[:, 6].values,
-                    'ref_v': df.iloc[:, 4].values,      
-                    'vir_v': df.iloc[:, 8].values,      
-                    'vir_vx': df.iloc[:, 9].values,     
-                    'vir_vy': df.iloc[:, 10].values,     
-                    'e_Vx': df.iloc[:, 11].values,      
-                    'e_Vy': df.iloc[:, 12].values,       
-                    'e_Vth': df.iloc[:, 13].values,     
-                    'e_Vv': df.iloc[:, 14].values,      
-                    'vir_steer': df.iloc[:, 15].values, 
-                    'vir_accel': df.iloc[:, 16].values, 
-                    'comp_time_ms': df.iloc[:, 18].values,
-                    'min_cost': df.iloc[:, 19].values,
-                    'mean_cost': df.iloc[:, 20].values
-                }
+            # 检查是否包含表头 (简单检查)
+            # 注意：如果CSV第一行就是数据，这里可能会报错，建议根据实际情况调整 header=None
+            # 这里假设 CSV 包含标准表头，或者我们按列索引读取
+            
+            # 这里的索引对应你在 MPPIControlNode 中定义的顺序：
+            # 0:timestamp, 1:ref_x, 2:ref_y, 3:ref_yaw, 4:ref_v, 5:ref_w
+            # 6:act_x, 7:act_y, 8:act_yaw, 9:act_v, 10:act_vx, 11:act_vy, 12:act_w
+            # 13:error_lon, 14:error_lat, 15:error_yaw, 16:error_v, 17:error_w
+            # 18:cmd_steer, 19:cmd_accel, 20:cmd_gear, 21:comp_time_ms, 22:min_cost, 23:mean_cost
+            
+            # 使用 iloc 读取，更稳健
+            df_vals = df.values # 转为 numpy array 处理
+            
+            # 如果包含表头，pandas会自动处理，df.iloc[:, i] 就是第 i 列数据
+            # 如果第一行被读作 header，且正好是你要的名字，直接用名字也行
+            # 这里为了保险，假设用户可能没改 header 或者 header 读取有问题，我们用 iloc
+            
+            raw = {
+                'x_ref': df.iloc[:, 1].values, 
+                'y_ref': df.iloc[:, 2].values,
+                'x_vir': df.iloc[:, 6].values, # act_x
+                'y_vir': df.iloc[:, 7].values, # act_y
+                'ref_v': df.iloc[:, 4].values,      
+                'ref_w': df.iloc[:, 5].values,  # NEW: ref_w
+                'vir_v': df.iloc[:, 9].values,  # act_v
+                'vir_vx': df.iloc[:, 10].values,     
+                'vir_vy': df.iloc[:, 11].values, 
+                'act_w': df.iloc[:, 12].values, # NEW: act_w
+                'e_Vx': df.iloc[:, 13].values,  # error_lon
+                'e_Vy': df.iloc[:, 14].values,  # error_lat
+                'e_Vth': df.iloc[:, 15].values, # error_yaw
+                'e_Vv': df.iloc[:, 16].values,  # error_v
+                'e_Vw': df.iloc[:, 17].values,  # NEW: error_w
+                'vir_steer': df.iloc[:, 18].values, 
+                'vir_accel': df.iloc[:, 19].values, 
+                'comp_time_ms': df.iloc[:, 21].values,
+                'min_cost': df.iloc[:, 22].values,
+                'mean_cost': df.iloc[:, 23].values
+            }
         except Exception as e:
             print(f"Error reading file: {e}")
             return None
@@ -111,15 +123,8 @@ def load_data(file_path):
     raw['time'] = np.arange(N) * dt
     return raw
 
-# %% NEW: 综合评分系统
+# %% 综合评分系统
 def calculate_score(val, target, limit):
-    """
-    计算单项得分 (线性插值)
-    :param val: 实际值
-    :param target: 完美值 (达到此值给满分)
-    :param limit: 容忍极限 (超过此值给0分)
-    :return: 0-100 分数
-    """
     if val <= target:
         return 100.0
     elif val >= limit:
@@ -136,6 +141,7 @@ def calculate_and_print_metrics(data):
     rmse_lat = np.sqrt(np.mean(data['e_Vy']**2))
     rmse_yaw = np.sqrt(np.mean(data['e_Vth']**2))
     rmse_v   = np.sqrt(np.mean(data['e_Vv']**2))
+    rmse_w   = np.sqrt(np.mean(data['e_Vw']**2)) # NEW
 
     max_lon = np.max(np.abs(data['e_Vx']))
     max_lat = np.max(np.abs(data['e_Vy']))
@@ -170,25 +176,22 @@ def calculate_and_print_metrics(data):
         'stab': 0.10  # 稳定性(Cost)
     }
 
-    # 单项打分 (阈值越严苛，分数越难拿)
-    # [Target, Limit]
+    # 单项打分
     s_lon  = calculate_score(rmse_lon, 0.05, 0.30)
-    s_lat  = calculate_score(rmse_lat, 0.03, 0.20) # 横向要求高
+    s_lat  = calculate_score(rmse_lat, 0.03, 0.20) 
     s_yaw  = calculate_score(rmse_yaw, 0.02, 0.10)
     
     s_tlon = calculate_score(term_lon, 0.02, 0.15)
-    s_tlat = calculate_score(term_lat, 0.02, 0.10) # 终点横向极其重要
-    s_tyaw = calculate_score(term_yaw, 0.01, 0.08) # 终点角度极其重要
+    s_tlat = calculate_score(term_lat, 0.02, 0.10) 
+    s_tyaw = calculate_score(term_yaw, 0.01, 0.08) 
 
     s_str  = calculate_score(mean_steer_rate, 0.5, 3.0)
     s_jerk = calculate_score(mean_jerk, 0.5, 4.0)
 
-    # 稳定性打分 (Cost 越低越好，但绝对值取决于权重设置，这里主要看相对值)
-    # 假设 Cost < 50 是优秀， > 200 是失控
     s_cost = calculate_score(avg_min_cost, 50, 200)
 
     # 加权总分
-    score_acc  = (s_lon + s_lat * 2 + s_yaw) / 4 # 横向权重翻倍
+    score_acc  = (s_lon + s_lat * 2 + s_yaw) / 4 
     score_term = (s_tlon + s_tlat * 2 + s_tyaw) / 4
     score_comf = (s_str + s_jerk) / 2
     score_stab = s_cost
@@ -198,10 +201,9 @@ def calculate_and_print_metrics(data):
                    score_comf * weights['comf'] + 
                    score_stab * weights['stab'])
     
-    # 评级
     grade = 'S' if final_score >= 90 else 'A' if final_score >= 80 else 'B' if final_score >= 70 else 'C' if final_score >= 60 else 'D'
 
-    # --- 打印报表 (Modified Format) ---
+    # --- 打印报表 ---
     print("="*60)
     print(f"{'EXPERIMENT PERFORMANCE METRICS':^60}")
     print("="*60)
@@ -213,6 +215,7 @@ def calculate_and_print_metrics(data):
     print(f"  Lateral Error (m):        {rmse_lat:.4f} / {max_lat:.4f}")
     print(f"  Heading Error (rad):      {rmse_yaw:.4f} / {max_yaw:.4f}  ({np.degrees(rmse_yaw):.2f}° / {np.degrees(max_yaw):.2f}°)")
     print(f"  Velocity Error (m/s):     {rmse_v:.4f}")
+    print(f"  Omega Error (rad/s):      {rmse_w:.4f}") # NEW
     print("-" * 60)
 
     print(f"[2] Terminal Parking Accuracy (Last 5 frames)")
@@ -226,7 +229,7 @@ def calculate_and_print_metrics(data):
     print(f"  Ride Comfort (Mean Jerk):   {mean_jerk:.4f} m/s³")
     print("-" * 60)
     
-    print(f"[4] Stability & Cost (NEW)")
+    print(f"[4] Stability & Cost")
     print(f"  Avg Min Cost:               {avg_min_cost:.2f}")
     print(f"  Cost Variance:              {cost_variance:.2f}")
     print("-" * 60)
@@ -303,6 +306,35 @@ def plot_velocities(data):
     ax2.legend(fontsize=16, loc='best')
     plt.tight_layout()
 
+def plot_angular_velocities(data):
+    """
+    NEW: 绘制角速度对比图
+    Subplot 1: Reference Omega vs Actual Omega
+    Subplot 2: Omega Error
+    """
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
+    
+    # 子图1：参考与实际角速度对比
+    ax1.plot(data['time'], data['ref_w'], color=COLORS['green'], linewidth=2.5, label=r'$\omega_{ref}$')
+    ax1.plot(data['time'], data['act_w'], color=COLORS['dark_blue'], linewidth=2.0, linestyle='--', label=r'$\omega_{act}$')
+    ax1.grid(True)
+    ax1.set_xlim([0, max(data['time'])])
+    ax1.set_ylabel(r'$\omega$ (rad/s)', fontsize=22)
+    ax1.tick_params(labelsize=18, width=2)
+    for spine in ax1.spines.values(): spine.set_linewidth(2)
+    ax1.legend(fontsize=16, loc='upper right', frameon=False)
+    
+    # 子图2：角速度误差
+    ax2.plot(data['time'], data['e_Vw'], color=COLORS['red'], linewidth=2.5)
+    ax2.grid(True)
+    ax2.set_xlim([0, max(data['time'])])
+    ax2.set_xlabel('Time(s)', fontsize=22)
+    ax2.set_ylabel(r'$e_{\omega}$ (rad/s)', fontsize=22)
+    ax2.tick_params(labelsize=18, width=2)
+    for spine in ax2.spines.values(): spine.set_linewidth(2)
+    
+    plt.tight_layout()
+
 def plot_errors(data):
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 6))
     def setup_error_ax(ax, y_label, is_bottom=False):
@@ -364,14 +396,9 @@ def plot_costs(data):
     """
     fig, ax = plt.subplots(figsize=(10, 5))
     
-    # 绘制 Mean Cost 的阴影范围，体现采样空间的分布
-    # 这里我们没有 std_cost，只能用 mean 和 min 的差值来模拟一下范围感
-    # 实际上 mean - min 越大，说明采样分布越广或者处于高成本区
-    
     ax.plot(data['time'], data['mean_cost'], color=COLORS['gray'], alpha=0.6, linewidth=1.5, label='Mean Cost (Sampling Avg)')
     ax.plot(data['time'], data['min_cost'], color=COLORS['purple'], linewidth=2.5, label='Min Cost (Optimal Traj)')
     
-    # 填充两者之间，展示优化潜力空间
     ax.fill_between(data['time'], data['min_cost'], data['mean_cost'], color=COLORS['purple'], alpha=0.1)
 
     ax.set_ylabel('MPPI Cost', fontsize=18)
@@ -398,6 +425,7 @@ if __name__ == "__main__":
         plot_trajectory(data_dict)
         plot_controls(data_dict)
         plot_velocities(data_dict)
+        plot_angular_velocities(data_dict) # NEW PLOT
         plot_errors(data_dict)
         plot_realtime(data_dict)
         plot_costs(data_dict)

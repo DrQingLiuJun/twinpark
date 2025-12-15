@@ -68,7 +68,7 @@ class MPPIController:
 
         # Reference Path storage
         self.ref_path_tensor = None 
-        self.ref_path_np = None     
+        self.ref_path = None     
         self.ref_times = None        
         
         self.trajectory_start_time = None 
@@ -82,24 +82,66 @@ class MPPIController:
         if num_points < 2:
             return
 
-        path_np = np.zeros((num_points, 4))
-        path_np[:, 0] = trajectory.x
-        path_np[:, 1] = trajectory.y
-        path_np[:, 2] = trajectory.yaw
-        path_np[:, 3] = trajectory.vx
+        path = np.zeros((num_points, 5))
+        path[:, 0] = trajectory.x
+        path[:, 1] = trajectory.y
+        path[:, 2] = trajectory.yaw
+        path[:, 3] = trajectory.vx
+
+        # --- Time Reconstruction ---
+        if hasattr(trajectory, 't') and len(trajectory.t) == num_points:
+             self.ref_times = np.array(trajectory.t)
+        else:
+            dists = np.sqrt(np.diff(path[:,0])**2 + np.diff(path[:,1])**2)
+            vels = path[:,3]
+            v_avg = np.maximum(np.abs(vels[:-1] + vels[1:]) / 2.0, 0.1)
+            dt_list = dists / v_avg
+            self.ref_times = np.zeros(num_points)
+            self.ref_times[1:] = np.cumsum(dt_list)
+
+        # --- Calculate Reference Angular Velocity (ref_w) [SAFE METHOD] ---
+        # 1. Unwrap yaw
+        yaw_unwrapped = np.unwrap(path[:, 2])
         
-        self.ref_path_np = path_np
-        self.ref_path_tensor = torch.tensor(path_np, dtype=torch.float32, device=self.device)
+        # 2. Manual Difference with Zero Division Check
+        ref_w = np.zeros(num_points)
+        dt_diff = np.diff(self.ref_times)
+        dyaw = np.diff(yaw_unwrapped)
         
-        # --- FIXED: Use trajectory.t if available ---
+        # Only calculate where dt > epsilon (avoids divide by zero at stop points)
+        valid_mask = dt_diff > 1e-4
+        if np.any(valid_mask):
+            ref_w[1:][valid_mask] = dyaw[valid_mask] / dt_diff[valid_mask]
+            
+        # Fill first point
+        if num_points > 1:
+            ref_w[0] = ref_w[1]
+
+        # 3. Smooth
+        window_size = 5
+        if num_points >= window_size:
+            window = np.ones(window_size) / window_size
+            ref_w_smooth = np.convolve(ref_w, window, mode='same')
+            ref_w_smooth[0] = ref_w[0]
+            ref_w_smooth[-1] = ref_w[-1]
+        else:
+            ref_w_smooth = ref_w
+        
+        # Store in 5th column
+        path[:, 4] = ref_w_smooth
+        
+        self.ref_path = path
+        # Only copy x, y, yaw, v to tensor for MPPI rollout (dim=4)
+        self.ref_path_tensor = torch.tensor(path[:, :4], dtype=torch.float32, device=self.device)
+        
         if hasattr(trajectory, 't') and len(trajectory.t) == num_points:
              # Use the time stamps calculated by the planner (which include the stop delay)
              self.ref_times = np.array(trajectory.t)
         else:
             # Fallback: Reconstruct Time (Only if t is missing)
             # Note: This will still collapse stops to 0 duration if t is missing
-            dists = np.sqrt(np.diff(path_np[:,0])**2 + np.diff(path_np[:,1])**2)
-            vels = path_np[:,3]
+            dists = np.sqrt(np.diff(path[:,0])**2 + np.diff(path[:,1])**2)
+            vels = path[:,3]
             v_avg = np.maximum(np.abs(vels[:-1] + vels[1:]) / 2.0, 0.1)
             dt_list = dists / v_avg
             
@@ -117,26 +159,27 @@ class MPPIController:
         # Stop at the end
         query_times = np.clip(query_times, 0, max_time)
         
-        rx = np.interp(query_times, self.ref_times, self.ref_path_np[:,0])
-        ry = np.interp(query_times, self.ref_times, self.ref_path_np[:,1])
-        rv = np.interp(query_times, self.ref_times, self.ref_path_np[:,3])
+        rx = np.interp(query_times, self.ref_times, self.ref_path[:,0])
+        ry = np.interp(query_times, self.ref_times, self.ref_path[:,1])
+        rv = np.interp(query_times, self.ref_times, self.ref_path[:,3])
+        rw = np.interp(query_times, self.ref_times, self.ref_path[:,4])
         
-        r_sin = np.interp(query_times, self.ref_times, np.sin(self.ref_path_np[:,2]))
-        r_cos = np.interp(query_times, self.ref_times, np.cos(self.ref_path_np[:,2]))
+        r_sin = np.interp(query_times, self.ref_times, np.sin(self.ref_path[:,2]))
+        r_cos = np.interp(query_times, self.ref_times, np.cos(self.ref_path[:,2]))
         ryaw = np.arctan2(r_sin, r_cos)
         
-        ref_np = np.stack([rx, ry, ryaw, rv], axis=1)
+        ref_np = np.stack([rx, ry, ryaw, rv, rw], axis=1)
         return torch.tensor(ref_np, dtype=torch.float32, device=self.device)
 
     def calc_control_input(self, observed_x: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float, float]:
-        if self.ref_path_np is None:
+        if self.ref_path is None:
             return np.zeros(2), np.zeros((self.T, 2)), 0.0, 0.0
 
         # --- 1. Time Sync ---
         now = rospy.Time.now().to_sec()
         
         if self.trajectory_start_time is None:
-            dists = np.linalg.norm(self.ref_path_np[:,:2] - observed_x[:2], axis=1)
+            dists = np.linalg.norm(self.ref_path[:,:2] - observed_x[:2], axis=1)
             closest_idx = np.argmin(dists)
             start_offset_time = self.ref_times[closest_idx]
             self.trajectory_start_time = now - start_offset_time
@@ -200,27 +243,28 @@ class MPPIController:
         """Tracking Cost Function with Dynamic Precision Weights"""
         ref_x, ref_y, ref_yaw, ref_v = ref_target[0], ref_target[1], ref_target[2], ref_target[3]
         
+        
         # Vector from Actual to Reference (Global Frame)
         # Note: Your logic "Reference - Actual" is correct for the vector direction
-        E_Px = ref_x - x[:, 0]
-        E_Py = ref_y - x[:, 1]
+        E_Vx = ref_x - x[:, 0]
+        E_Vy = ref_y - x[:, 1]
         
         # --- 修正部分：误差转换到车体坐标系 (Body Frame) ---
-        # 使用实际车辆的航向角 (act_yaw) 进行旋转投影
-        act_yaw = x[:, 2]
+        # 使用实际车辆的航向角 (vir_yaw) 进行旋转投影
+        vir_yaw = x[:, 2]
         
-        # e_lat (Body Y axis): 侧向误差 (Positive if target is to the LEFT of the vehicle)
+        # e_Vy (Body Y axis): 侧向误差 (Positive if target is to the LEFT of the vehicle)
         # -sin(theta)*dx + cos(theta)*dy
-        e_lat = -torch.sin(act_yaw) * E_Px + torch.cos(act_yaw) * E_Py
+        e_Vy = -torch.sin(vir_yaw) * E_Vx + torch.cos(vir_yaw) * E_Vy
         
-        # e_lon (Body X axis): 纵向误差 (Positive if target is IN FRONT of the vehicle)
+        # e_Vx (Body X axis): 纵向误差 (Positive if target is IN FRONT of the vehicle)
         # cos(theta)*dx + sin(theta)*dy
-        e_lon = torch.cos(act_yaw) * E_Px + torch.sin(act_yaw) * E_Py
+        e_Vx = torch.cos(vir_yaw) * E_Vx + torch.sin(vir_yaw) * E_Vy
         
-        yaw_diff = ref_yaw - x[:, 2] 
-        yaw_diff = torch.atan2(torch.sin(yaw_diff), torch.cos(yaw_diff))
+        e_Vyaw = ref_yaw - x[:, 2] 
+        e_Vyaw = torch.atan2(torch.sin(e_Vyaw), torch.cos(e_Vyaw))
         
-        v_error = ref_v - x[:, 3]
+        e_Vv = ref_v - x[:, 3]
 
         # --- Dynamic Precision Logic ---
         # 如果参考速度很低 (接近换向点或终点)，我们要大幅提高对“位置和航向”的惩罚力度
@@ -235,10 +279,10 @@ class MPPIController:
         w_yaw = self.stage_cost_weight[2] * precision_gain # Dynamic
         w_v   = self.stage_cost_weight[3]
 
-        cost = w_lon * e_lon**2 + \
-               w_lat * e_lat**2 + \
-               w_yaw * yaw_diff**2 + \
-               w_v   * v_error**2
+        cost = w_lon * e_Vx**2 + \
+               w_lat * e_Vy**2 + \
+               w_yaw * e_Vyaw**2 + \
+               w_v   * e_Vv**2
              
         return cost
 
@@ -246,32 +290,32 @@ class MPPIController:
         """Terminal Cost"""
         ref_x, ref_y, ref_yaw, ref_v = ref_target[0], ref_target[1], ref_target[2], ref_target[3]
         
-        E_Px = ref_x - x[:, 0]
-        E_Py = ref_y - x[:, 1]
+        E_Vx = ref_x - x[:, 0]
+        E_Vy = ref_y - x[:, 1]
         
         # --- 修正部分：同样在 Terminal Cost 中使用车体坐标系 ---
-        act_yaw = x[:, 2]
+        vir_yaw = x[:, 2]
         
-        e_lat = -torch.sin(act_yaw) * E_Px + torch.cos(act_yaw) * E_Py
-        e_lon = torch.cos(act_yaw) * E_Px + torch.sin(act_yaw) * E_Py
+        e_Vy = -torch.sin(vir_yaw) * E_Vx + torch.cos(vir_yaw) * E_Vy
+        e_Vx = torch.cos(vir_yaw) * E_Vx + torch.sin(vir_yaw) * E_Vy
         
-        yaw_diff = torch.atan2(ref_yaw - torch.sin(x[:, 2]), ref_yaw - torch.cos(x[:, 2]))
-        v_error = ref_v - x[:, 3]
+        e_Vyaw = torch.atan2(ref_yaw - torch.sin(x[:, 2]), ref_yaw - torch.cos(x[:, 2]))
+        e_Vv = ref_v - x[:, 3]
         
-        cost = self.terminal_cost_weight[0] * e_lon**2 + \
-               self.terminal_cost_weight[1] * e_lat**2 + \
-               self.terminal_cost_weight[2] * yaw_diff**2 + \
-               self.terminal_cost_weight[3] * v_error**2
+        cost = self.terminal_cost_weight[0] * e_Vx**2 + \
+               self.terminal_cost_weight[1] * e_Vy**2 + \
+               self.terminal_cost_weight[2] * e_Vyaw**2 + \
+               self.terminal_cost_weight[3] * e_Vv**2
                
         return cost
 
     def _F(self, x_t, v_t):
         x, y, yaw, v = x_t[:, 0], x_t[:, 1], x_t[:, 2], x_t[:, 3]
-        steer, accel = v_t[:, 0], v_t[:, 1]
-        new_v = v + accel * self.delta_t
+        u_Vsteer, u_Vaccel = v_t[:, 0], v_t[:, 1]
+        new_v = v + u_Vaccel * self.delta_t
         new_x = x + new_v * torch.cos(yaw) * self.delta_t
         new_y = y + new_v * torch.sin(yaw) * self.delta_t
-        new_yaw = yaw + new_v / self.wheel_base * torch.tan(steer) * self.delta_t
+        new_yaw = yaw + new_v / self.wheel_base * torch.tan(u_Vsteer) * self.delta_t
         return torch.stack([new_x, new_y, new_yaw, new_v], dim=1)
 
     def _calc_epsilon(self, sigma, size_sample, size_time_step, size_dim_u):
@@ -331,10 +375,10 @@ class MPPIControlNode:
         timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.csv_filename = os.path.join(log_dir, f'mppi_log_{timestamp_str}.csv')
         self.csv_header = [
-            'timestamp', 'ref_x', 'ref_y', 'ref_yaw', 'ref_v',
-            'act_x', 'act_y', 'act_yaw', 'act_v', 'act_vx', 'act_vy',
-            'error_lon', 'error_lat', 'error_yaw', 'error_v',
-            'cmd_steer', 'cmd_accel', 'cmd_gear', 'comp_time_ms', 'min_cost', 'mean_cost'
+            'timestamp', 'ref_x', 'ref_y', 'ref_yaw', 'ref_v', 'ref_w',
+            'vir_x', 'vir_y', 'vir_yaw', 'vir_v', 'vir_vx', 'vir_vy', 'vir_w',
+            'e_Vx', 'e_Vy', 'e_Vyaw', 'e_Vv', 'e_Vw',
+            'u_Vsteer', 'u_Vaccel', 'cmd_gear', 'comp_time_ms', 'min_cost', 'mean_cost'
         ]
         with open(self.csv_filename, 'w', newline='') as f:
             writer = csv.writer(f)
@@ -355,7 +399,7 @@ class MPPIControlNode:
         self.sigma_accel = rospy.get_param('~mppi_control_node/sigma_accel', 0.8)
         
         # Cost weights: Heavy penalty on Lateral and Yaw
-        # [e_lon, e_lat, e_yaw, e_v]
+        # [e_Vx, e_Vy, e_yaw, e_v]
         self.stage_cost_weight = rospy.get_param('~mppi_control_node/stage_cost_weight', [20.0, 100.0, 80.0, 10.0])
         self.terminal_cost_weight = rospy.get_param('~mppi_control_node/terminal_cost_weight', [50.0, 200.0, 150.0, 20.0])
         
@@ -363,7 +407,8 @@ class MPPIControlNode:
         self.max_steer_deg = rospy.get_param('~mppi_control_node/max_steer', 45.0)
         self.max_accel = rospy.get_param('~mppi_control_node/max_accel', 2.0)
         self.publish_rate = rospy.get_param('~mppi_control_node/publish_rate', 20.0)
-        rospy.loginfo(f"stage_cost_weight: {self.stage_cost_weight}, terminal_cost_weight: {self.terminal_cost_weight}")
+        rospy.loginfo(f"stage_cost_weight: {self.stage_cost_weight}")
+        rospy.loginfo(f"terminal_cost_weight: {self.terminal_cost_weight}")
         
         
     def state_callback(self, msg):
@@ -406,17 +451,17 @@ class MPPIControlNode:
             self._last_gear = target_gear
         
         cmd = ControlCmd()
-        steer_rad = optimal_input[0]
+        u_Vsteer = optimal_input[0]
         max_steer_rad = math.radians(self.max_steer_deg)
-        cmd.steer = np.clip(steer_rad / max_steer_rad, -1.0, 1.0)
+        cmd.steer = np.clip(u_Vsteer / max_steer_rad, -1.0, 1.0)
         
-        accel = optimal_input[1]
+        u_Vaccel = optimal_input[1]
         
         if not hasattr(self, '_last_accel'):
             self._last_accel = 0.0
-        alpha_accel = 0.4 # Slightly faster accel response
-        accel = alpha_accel * accel + (1 - alpha_accel) * self._last_accel
-        self._last_accel = accel
+        alpha_accel = 0.4 # Slightly faster u_Vaccel response
+        u_Vaccel = alpha_accel * u_Vaccel + (1 - alpha_accel) * self._last_accel
+        self._last_accel = u_Vaccel
         
         cmd.reverse = (target_gear == -1)
         cmd.gear = target_gear
@@ -424,17 +469,17 @@ class MPPIControlNode:
         accel_deadzone = 0.02 # Reduced deadzone
         
         if target_gear == 1:
-            if accel > accel_deadzone:
-                cmd.throttle = min(accel / self.max_accel, 1.0); cmd.brake = 0.0
-            elif accel < -accel_deadzone:
-                cmd.throttle = 0.0; cmd.brake = min(-accel / self.max_accel, 1.0)
+            if u_Vaccel > accel_deadzone:
+                cmd.throttle = min(u_Vaccel / self.max_accel, 1.0); cmd.brake = 0.0
+            elif u_Vaccel < -accel_deadzone:
+                cmd.throttle = 0.0; cmd.brake = min(-u_Vaccel / self.max_accel, 1.0)
             else:
                 cmd.throttle = 0.0; cmd.brake = 0.0
         else:
-            if accel < -accel_deadzone:
-                cmd.throttle = min(-accel / self.max_accel, 1.0); cmd.brake = 0.0
-            elif accel > accel_deadzone:
-                cmd.throttle = 0.0; cmd.brake = min(accel / self.max_accel, 1.0)
+            if u_Vaccel < -accel_deadzone:
+                cmd.throttle = min(-u_Vaccel / self.max_accel, 1.0); cmd.brake = 0.0
+            elif u_Vaccel > accel_deadzone:
+                cmd.throttle = 0.0; cmd.brake = min(u_Vaccel / self.max_accel, 1.0)
             else:
                 cmd.throttle = 0.0; cmd.brake = 0.0
 
@@ -444,41 +489,39 @@ class MPPIControlNode:
             cmd.throttle = 0.0
             cmd.brake = 1.0 # Hard brake for wrong direction
 
-        self._log_to_csv(observed_x, steer_rad, accel, target_gear, comp_time, min_cost, mean_cost)
+        self._log_to_csv(observed_x, u_Vsteer, u_Vaccel, target_gear, comp_time, min_cost, mean_cost)
         return cmd
     
-    def _log_to_csv(self, observed_x, steer_rad, accel, target_gear, comp_time, min_cost, mean_cost):
+    def _log_to_csv(self, observed_x, u_Vsteer, u_Vaccel, target_gear, comp_time, min_cost, mean_cost):
         try:
             ref_point = self.mppi.current_ref_point_debug
             if ref_point is None:
                 return
             
-            ref_x, ref_y, ref_yaw, ref_v = ref_point[0], ref_point[1], ref_point[2], ref_point[3]
+            # ref_point includes w at index 4 now
+            ref_x, ref_y, ref_yaw, ref_v, ref_w = ref_point[0], ref_point[1], ref_point[2], ref_point[3], ref_point[4]
+            vir_x, vir_y, vir_yaw, vir_vx = observed_x[0], observed_x[1], observed_x[2], observed_x[3]
+
+            vir_vy = getattr(self.current_state, 'vy', 0.0)
+            vir_v = np.sign(vir_vx) * np.sqrt(vir_vx**2 + vir_vy**2)
+            vir_w = getattr(self.current_state, 'omega', 0.0) # Get actual omega
             
-            act_vx = observed_x[3]
-            act_vy = getattr(self.current_state, 'vy', 0.0)
-            act_v = np.sign(act_vx) * np.sqrt(act_vx**2 + act_vy**2)
-            
-            E_Px = ref_x - observed_x[0]
-            E_Py = ref_y - observed_x[1]
+            E_Vx = ref_x - vir_x
+            E_Vy = ref_y - vir_y
             
             # --- 修正日志部分：使用实际车辆Yaw计算Body Error ---
-            act_yaw = observed_x[2]
-            
-            # error_lon = dx * cos(theta) + dy * sin(theta)
-            error_lon = np.cos(act_yaw) * E_Px + np.sin(act_yaw) * E_Py
-            # error_lat = -dx * sin(theta) + dy * cos(theta)
-            error_lat = -np.sin(act_yaw) * E_Px + np.cos(act_yaw) * E_Py
-            
-            error_yaw = np.arctan2(np.sin(ref_yaw - observed_x[2]), np.cos(ref_yaw - observed_x[2]))
-            error_v = ref_v - act_vx
+            e_Vx = np.cos(vir_yaw) * E_Vx + np.sin(vir_yaw) * E_Vy
+            e_Vy = -np.sin(vir_yaw) * E_Vx + np.cos(vir_yaw) * E_Vy
+            e_Vyaw = np.arctan2(np.sin(ref_yaw - observed_x[2]), np.cos(ref_yaw - observed_x[2]))
+            e_Vv = ref_v - vir_vx
+            e_Vw = ref_w - vir_w
             
             row = [
                 rospy.Time.now().to_sec(),
-                ref_x, ref_y, ref_yaw, ref_v,
-                observed_x[0], observed_x[1], observed_x[2], act_v, act_vx, act_vy,
-                error_lon, error_lat, error_yaw, error_v,
-                steer_rad, accel, target_gear, comp_time, min_cost, mean_cost
+                ref_x, ref_y, ref_yaw, ref_v, ref_w,
+                vir_x, vir_y, vir_yaw, vir_v, vir_vx, vir_vy, vir_w,
+                e_Vx, e_Vy, e_Vyaw, e_Vv, e_Vw,
+                u_Vsteer, u_Vaccel, target_gear, comp_time, min_cost, mean_cost
             ]
             
             with open(self.csv_filename, 'a', newline='') as f:

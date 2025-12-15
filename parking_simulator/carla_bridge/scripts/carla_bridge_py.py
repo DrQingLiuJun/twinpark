@@ -244,7 +244,7 @@ class CarlaBridgePy:
                 self._first_state_logged = True
             
             # Calculate angular velocity (omega)
-            omega = math.radians(carla_angular_velocity.z)
+            omega = math.radians(carla_angular_velocity.z) * -1
             
             # Record actual trajectory point (only if moved enough)
             min_dist = 0.1  # Minimum distance between recorded points
