@@ -511,8 +511,39 @@ class MPPIControlNode:
             cmd.throttle = 0.0
             cmd.brake = 1.0 # Hard brake for wrong direction
 
+        self._print_console_debug(observed_x, u_Vsteer, u_Vaccel, cmd)
+        
         self._log_to_csv(observed_x, u_Vsteer, u_Vaccel, target_gear, comp_time, min_cost, mean_cost)
         return cmd
+    
+    def _print_console_debug(self, observed_x, u_Vsteer, u_Vaccel, cmd):
+        """Pretty print debug information to console"""
+        ref_point = self.mppi.current_ref_point_debug
+        if ref_point is None: return
+
+        # Unpack Ref and Vir
+        ref_x, ref_y, ref_yaw, ref_v = ref_point[0], ref_point[1], ref_point[2], ref_point[3]
+        vir_x, vir_y, vir_yaw, vir_v = observed_x[0], observed_x[1], observed_x[2], observed_x[3]
+        
+        # Calculate Errors (Body Frame)
+        E_Vx = ref_x - vir_x
+        E_Vy = ref_y - vir_y
+        e_Vx = np.cos(vir_yaw) * E_Vx + np.sin(vir_yaw) * E_Vy
+        e_Vy = -np.sin(vir_yaw) * E_Vx + np.cos(vir_yaw) * E_Vy
+        e_Vyaw = np.arctan2(np.sin(ref_yaw - vir_yaw), np.cos(ref_yaw - vir_yaw))
+        e_Vv = ref_v - vir_v
+
+        # Print Formatted Table
+        rospy.loginfo_throttle(0.5,
+            "\n" + "="*65 + "\n"
+            f" [MPPI STATUS] Mode: {'REVERSE' if cmd.gear < 0 else 'FORWARD'}\n"
+            f" REF : X={ref_x:6.2f} | Y={ref_y:6.2f} | Yaw={math.degrees(ref_yaw):6.1f}° | V={ref_v:5.2f}\n"
+            f" CUR : X={vir_x:6.2f} | Y={vir_y:6.2f} | Yaw={math.degrees(vir_yaw):6.1f}° | V={vir_v:5.2f}\n"
+            f" ERR : Lon={e_Vx:5.2f} | Lat={e_Vy:5.2f} | Yaw={math.degrees(e_Vyaw):5.1f}° | V={e_Vv:5.2f}\n"
+            f" OUT : Steer={math.degrees(u_Vsteer):5.1f}° | Accel={u_Vaccel:5.2f}\n"
+            f" CMD : Thr={cmd.throttle:4.2f} | Brk={cmd.brake:4.2f} | Str={cmd.steer:5.2f} | G={cmd.gear}\n"
+            + "="*65
+        )
     
     def _log_to_csv(self, observed_x, u_Vsteer, u_Vaccel, target_gear, comp_time, min_cost, mean_cost):
         try:
@@ -551,7 +582,8 @@ class MPPIControlNode:
             row_phy = self.phy_state_data
 
             if not self.catch_phy:
-                rospy.logwarn_throttle(5.0, f"[CSV] No physical vehicle data received.")
+                # rospy.logwarn_throttle(5.0, f"[CSV] No physical vehicle data received.")
+                pass
 
             # Combine
             full_row = row_vir + list(row_phy)

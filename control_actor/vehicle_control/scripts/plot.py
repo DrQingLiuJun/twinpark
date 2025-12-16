@@ -1,10 +1,14 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 import os
 
-# %% 0. 全局设置与颜色定义
+
+# 0. 全局设置与颜色定义
+
 # 设置全局字体为 Arial
 rcParams['font.family'] = 'sans-serif'
 rcParams['font.sans-serif'] = ['Arial']
@@ -26,7 +30,7 @@ COLORS = {
 }
 
 # 文件路径 (请修改为你本地的实际路径)
-FILE_PATH = r'/home/user/dynamic_map/src/twinpark/control_actor/vehicle_control/logs/mppi_log_20251215_122447.csv'
+FILE_PATH = r'/home/qingliu/TwinPark/twinpark_ws/src/twinpark/control_actor/vehicle_control/logs/guided_mppi_log_20251216_210648.csv'
 
 # %% 1. 数据读取与处理
 def load_data(file_path):
@@ -207,8 +211,6 @@ def calculate_and_print_metrics(data):
     print("="*60)
     print(f"{'EXPERIMENT PERFORMANCE METRICS':^60}")
     print("="*60)
-    print(f"FINAL SCORE: {final_score:5.1f} / 100   [ Grade: {grade} ]")
-    print("-" * 60)
     
     print(f"[1] Tracking Accuracy (RMSE / Max)")
     print(f"  Longitudinal Error (m):   {rmse_lon:.4f} / {max_lon:.4f}")
@@ -237,6 +239,10 @@ def calculate_and_print_metrics(data):
     print(f"[5] Real-time Performance")
     print(f"  Mean Computation Time:      {mean_time:.2f} ms")
     print(f"  Max Computation Time:       {max_time:.2f} ms")
+    
+    print("-" * 60)
+    print(f"FINAL SCORE: {final_score:5.1f} / 100   [ Grade: {grade} ]")
+    
     print("="*60)
 
 # %% 绘图函数

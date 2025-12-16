@@ -43,9 +43,9 @@ planner_node:
   
   # Vehicle Geometry
   wheelbase: 3.368          # Wheelbase in meters
-  width: 1.8                # Vehicle width in meters
-  length: 4.5               # Vehicle length in meters
-  max_steer: 45.0           # Maximum steering angle in degrees
+  width: 2.857              # Vehicle width in meters 1.8
+  length: 4.955             # Vehicle length in meters 4.5
+  max_steer: 40.0           # Maximum steering angle in degrees
   min_turn_radius: 5.0      # Minimum turning radius in meters
   
   # Speed Planning Parameters
@@ -69,12 +69,34 @@ planner_node:
   obstacles:
     x_bounds: [9.476, 27.401]    # X bounds of the environment
     y_bounds: [-10.101, 14.377]  # Y bounds of the environment
-    
+
+    static_vehicles:
+      - name: "L2"
+        x: 23.8      # 障碍车L2
+        y: 7.1
+        yaw: 180.0
+      - name: "L6"
+        x: 24.0      # 障碍车L6
+        y: -6.7       
+        yaw: 180.0
+      - name: "R2"
+        x: 13.9      # 障碍车R2
+        y: 8.7
+        yaw: 30.0
+      - name: "R4"
+        x: 12.7      # 障碍车R4
+        y: 0.1
+        yaw: 0.0
+      - name: "R5"
+        x: 13.2      # 障碍车R5
+        y: -4.3
+        yaw: -24.0
+
     # Parking slots (for reference, not used as obstacles)
     parking_slots:
       - row: 1
         col: 3
-        x: 23.8 #换的问题，生成carla的车辆时，使用的是carla坐标系，
+        x: 23.8 
         y: 0.1
         yaw: 180.0
       - row: 2
@@ -140,15 +162,15 @@ mppi_control_node:
   alpha: 0.6               # 平滑系数，遵循上一步控制量的程度，让控制器对当前的误差反应更灵敏。
   
   # Noise Parameters (Covariance)
-  sigma_steer: 0.35          # Steering noise std dev (rad) - 扩大搜索范围，让控制器敢于尝试大角度转向。
+  sigma_steer: 0.3          # Steering noise std dev (rad) - 扩大搜索范围，让控制器敢于尝试大角度转向。
   sigma_accel: 0.1          # Acceleration noise std dev (m/s²) - increased for better reverse exploration
   
   # Cost Function Weights [lateral_error, yaw, v]
   # Stage cost: balanced weights for smooth path following
   # Terminal cost: emphasize accurate final position
   # Note: Increased velocity weight to ensure proper speed tracking in reverse
-  stage_cost_weight: [30.0, 80.0, 80.0, 0.0]      # Stage cost weights [e_lon, e_lat, e_yaw, e_v] - v increased
-  terminal_cost_weight: [50.0, 100.0, 80.0, 0.0]   # Terminal cost weights [e_lon, e_lat, e_yaw, e_v] - v increased
+  stage_cost_weight: [20.0, 60.0, 60.0, 5.0]      # Stage cost weights [e_lon, e_lat, e_yaw, e_v] - v increased
+  terminal_cost_weight: [50.0, 100.0, 80.0, 5.0]   # Terminal cost weights [e_lon, e_lat, e_yaw, e_v] - v increased
   
   # Vehicle Parameters
   wheelbase: 3.368          # Vehicle wheelbase (m)
@@ -157,3 +179,28 @@ mppi_control_node:
   
   # Control Rate
   publish_rate: 20.0        # Control loop frequency (Hz)
+
+# ============================================================================
+# Hybrid A*-Guided MPPI Configuration (Optimized for Parking)
+# ============================================================================
+hybrid_mppi_control:
+  delta_t: 0.05
+  horizon_T: 30              # 1.5s 视界
+  num_samples_K: 500
+  exploration: 0.05
+  
+  # 稳定性调整
+  lambda: 50.0               # [降低] 80->20。允许 MPPI 在遇到误差时，更灵活地偏离名义轨迹去修正，而不是死板地贴着。
+  alpha: 0.2                 # [增加] 0.05->0.3。增加历史控制量的平滑权重，物理上抑制高频震荡。
+  
+  sigma_steer: 0.08          
+  sigma_accel: 0.3          # 给予足够的油门探索空间
+  
+  # 权重微调：降低速度权重，避免对未来速度变化过度敏感
+  stage_cost_weight: [10.0, 40.0, 40.0, 80.0]      
+  terminal_cost_weight: [20.0, 80.0, 80.0, 20.0] 
+  
+  wheelbase: 3.368
+  max_steer: 45.0
+  max_accel: 1.5             # 限制最大加速度输出，物理上减缓震荡
+  publish_rate: 20.0

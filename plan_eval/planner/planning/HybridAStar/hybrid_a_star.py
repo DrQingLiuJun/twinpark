@@ -543,7 +543,7 @@ def generate_trajectory(path):
              
         n_points = len(seg_x)
         target_v = 0.5  # 目标巡航速度
-        target_a = 0.05  # 加速度
+        target_a = 0.1  # 加速度
 
         # === 核心修改：使用梯形生成器代替 velocity_planning ===
         seg_vel = generate_trapezoidal_profile(dist, n_points, target_v, target_a)

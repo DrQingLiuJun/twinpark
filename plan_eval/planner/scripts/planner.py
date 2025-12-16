@@ -46,38 +46,37 @@ class PlannerNode:
         self.current_state = None
         self.trajectory_published = False
         
-        rospy.loginfo("Parameters loaded")
-        rospy.loginfo("Planner node initialized")
+        rospy.loginfo("Parameters loaded, Planner node initialized")
         
     def load_parameters(self):
         """Load parameters from ROS parameter server"""
         # Hybrid A* parameters
-        self.xy_resolution = rospy.get_param('~xy_resolution', 0.755)
-        self.yaw_resolution = rospy.get_param('~yaw_resolution', 10.0)
+        self.xy_resolution = rospy.get_param('~planner_node/xy_resolution', 0.755)
+        self.yaw_resolution = rospy.get_param('~planner_node/yaw_resolution', 10.0)
         
         # Vehicle parameters
-        self.wheelbase = rospy.get_param('~wheelbase', 3.368)
-        self.width = rospy.get_param('~width', 2.857)
-        self.length = rospy.get_param('~length', 4.955)
-        self.max_steer = rospy.get_param('~max_steer', 45.0)
+        self.wheelbase = rospy.get_param('~planner_node/wheelbase', 3.368)
+        self.width = rospy.get_param('~planner_node/width', 2.857)
+        self.length = rospy.get_param('~planner_node/length', 4.955)
+        self.max_steer = rospy.get_param('~planner_node/max_steer', 45.0)
         
         # Speed planning parameters
-        self.max_speed = rospy.get_param('~max_speed', 2.0)
-        self.max_accel = rospy.get_param('~max_accel', 1.0)
-        self.max_jerk = rospy.get_param('~max_jerk', 0.5)
+        self.max_speed = rospy.get_param('~planner_node/max_speed', 2.0)
+        self.max_accel = rospy.get_param('~planner_node/max_accel', 1.0)
+        self.max_jerk = rospy.get_param('~planner_node/max_jerk', 0.5)
         
         # Goal configuration
-        self.goal_x = rospy.get_param('~goal_x', 23.8)
-        self.goal_y = rospy.get_param('~goal_y', 0.1)
-        self.goal_yaw = math.radians(rospy.get_param('~goal_yaw', 180.0))
+        self.goal_x = rospy.get_param('~planner_node/goal_x', 23.8)
+        self.goal_y = rospy.get_param('~planner_node/goal_y', 0.1)
+        self.goal_yaw = math.radians(rospy.get_param('~planner_node/goal_yaw', 180.0))
         
         # Auto planning
-        self.auto_plan = rospy.get_param('~auto_plan', True)
+        self.auto_plan = rospy.get_param('~planner_node/auto_plan', True)
         
         # Obstacle map
-        obstacles = rospy.get_param('~obstacles', {})
-        self.x_bounds = obstacles.get('x_bounds', [9.476, 27.401])
-        self.y_bounds = obstacles.get('y_bounds', [-10.101, 14.377])
+        self.obstacles_config = rospy.get_param('~planner_node/obstacles', {})
+        self.x_bounds = self.obstacles_config.get('x_bounds', [9.476, 27.401])
+        self.y_bounds = self.obstacles_config.get('y_bounds', [-10.101, 14.377])
         
         # Convert yaw resolution to radians
         self.yaw_resolution_rad = math.radians(self.yaw_resolution)

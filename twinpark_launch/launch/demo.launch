@@ -44,12 +44,13 @@
        ======================================================================== -->
   <node name="planner_node" 
         pkg="planner" 
-        type="planner.py" 
+        type="planner_obs.py" 
         output="$(arg output)"
         launch-prefix="bash -c 'sleep 0.5; $0 $@' ">
-    <!-- Load planner parameters from unified config -->
     <rosparam command="load" file="$(arg config_file)" subst_value="true" />
   </node>
+
+
   
   <!-- ========================================================================
        3. Trajectory Server Node (Python)
@@ -70,45 +71,44 @@
        Runs in separate Python environment with PyTorch support
        Delay: 2 seconds (wait for Trajectory Server)
        ======================================================================== -->
-  <node name="vehicle_control_node" 
+  <!-- <node name="vehicle_control_node" 
         pkg="vehicle_control" 
         type="mppi_control.py" 
         output="$(arg output)"
         respawn="false"
         launch-prefix="bash -c 'sleep 2; $0 $@' ">
     <rosparam command="load" file="$(arg config_file)" />
-  </node>
+  </node> -->
 
-  <!-- <node name="mppi_control_node" 
+  <node name="mppi_control_node" 
         pkg="vehicle_control" 
         type="run_mppi_with_pytorch.sh" 
         output="$(arg output)"
         respawn="false"
         launch-prefix="bash -c 'sleep 2; $0 $@'" >
     <rosparam command="load" file="$(arg config_file)" />
-  </node> -->
+  </node>
 
   <!-- ========================================================================
        Visualization Node
        Publishes markers and paths for RViz
        ======================================================================== -->
-  <node name="visualization_node" 
+  <!-- <node name="visualization_node" 
         pkg="twinpark_launch" 
         type="visualization_node.py" 
         output="$(arg output)"
         launch-prefix="bash -c 'sleep 1; $0 $@' ">
     <rosparam command="load" file="$(arg config_file)" />
-  </node>
+  </node> -->
   
   <!-- ========================================================================
        RViz Visualization
        ======================================================================== -->
-  <node name="rviz" 
+  <!-- <node name="rviz" 
         pkg="rviz" 
         type="rviz" 
         args="-d $(find twinpark_launch)/config/twinpark.rviz" 
         if="$(arg use_rviz)"
         required="false"
-        launch-prefix="bash -c 'sleep 7; $0 $@' "/>
-
-</launch>
+        launch-prefix="bash -c 'sleep 7; $0 $@' "/>-->
+</launch> 

@@ -1,1 +1,0 @@
-timestamp,ref_x,ref_y,ref_yaw,ref_v,ref_w,vir_x,vir_y,vir_yaw,vir_v,vir_vx,vir_vy,vir_w,e_Vx,e_Vy,e_Vyaw,e_Vv,e_Vw,u_Vsteer,u_Vaccel,cmd_gear,comp_time_ms,min_cost,mean_cost,ref_Px,ref_Py,ref_Pyaw,ref_Pv,ref_Pw,phy_x,phy_y,phy_yaw,phy_v,phy_w,e_Px,e_Py,e_Pyaw,e_Pv,e_Pw,u_Pv,u_Pw,phy_v_hat,phy_f_hat,phy_tau

@@ -28,6 +28,7 @@ class CarlaBridgePy:
         self.client = None
         self.world = None
         self.vehicle = None
+        self.obstacle_vehicles = [] # List to store obstacle vehicle actors
         
         # ROS publishers and subscribers
         self.state_pub = rospy.Publisher('/vehicle_state', VehicleState, queue_size=10)
@@ -50,8 +51,13 @@ class CarlaBridgePy:
         self.actual_trajectory = []  # List of (x_ros, y_ros) tuples
         self.last_actual_pos = None
         
-        # Connect to CARLA and spawn vehicle
+        # Connect to CARLA 
         self.connect_carla()
+        
+        # Spawn static obstacles
+        self.spawn_obstacles()
+        
+        # Spawn ego vehicle
         self.spawn_vehicle()
 
         # Set the view
@@ -119,9 +125,6 @@ class CarlaBridgePy:
             tuple: (x_carla, y_carla, yaw_carla_deg)
         """
         # Inverse transformation: ROS -> CARLA
-        # x_ros = -x_carla => x_carla = -x_ros
-        # y_ros = y_carla => y_carla = y_ros
-        # yaw_ros = 180° - yaw_carla => yaw_carla = 180° - yaw_ros
         x_carla = -x_ros
         y_carla = y_ros
         yaw_carla_deg = 180.0 - yaw_ros_deg
@@ -169,16 +172,81 @@ class CarlaBridgePy:
             rospy.logerr(f"Failed to spawn vehicle: {e}")
             sys.exit(1)
     
+    def spawn_obstacles(self):
+        """Spawn static obstacle vehicles if they don't already exist"""
+        try:
+            # 1. Fetch obstacle list from ROS Parameter Server
+            static_vehicles_param = rospy.get_param('~planner_node/obstacles/static_vehicles', [])
+            if not static_vehicles_param:
+                rospy.logwarn("No static vehicles found in params (/planner_node/obstacles/static_vehicles). Skipping obstacle spawn.")
+                return
+
+            rospy.loginfo(f"Found {len(static_vehicles_param)} static obstacles in configuration.")
+            
+            blueprint_library = self.world.get_blueprint_library()
+            
+            # Find vehicle blueprint
+            obstacle_bp = None
+            for bp in blueprint_library.filter('vehicle.*'):
+                if 'haut' in bp.id.lower(): 
+                    obstacle_bp = bp
+                    break
+            
+            if obstacle_bp is None:
+                obstacle_bp = blueprint_library.filter('vehicle.lincoln.mkz_2017')[0]
+                rospy.logwarn("Obstacle filter 'haut' not found, using default Lincoln MKZ")
+   
+            # 1. Get existing actors in the world to check for duplicates
+            existing_actors = self.world.get_actors().filter('vehicle.*')
+
+            for i, vehicle_data in enumerate(static_vehicles_param):
+                # Get ROS coordinates from YAML
+                name = str(vehicle_data['name'])
+                x = float(vehicle_data['x'])
+                y = float(vehicle_data['y'])
+                yaw = float(vehicle_data['yaw'])
+                
+                target_location = carla.Location(x=x, y=y, z=0.1)
+                
+                # Check if an obstacle already exists at this location
+                already_exists = False
+                for actor in existing_actors.filter('vehicle.*'):
+                    # Calculate distance
+                    dist = actor.get_location().distance(target_location)
+                    if dist < 1.0: # If a vehicle is within 1 meter
+                        already_exists = True
+                        rospy.loginfo(f"Obstacle {name} already exists at location. Skipping spawn.")
+                        # We can add it to our list to manage it if needed, but requirements say don't destroy.
+                        # self.obstacle_vehicles.append(actor) 
+                        break
+                
+                if not already_exists:
+                    # Set role_name to identify it later if needed
+                    obstacle_bp.set_attribute('role_name', name)
+                    
+                    transform = carla.Transform(
+                        target_location,
+                        carla.Rotation(yaw=yaw)
+                    )
+                    
+                    actor = self.world.try_spawn_actor(obstacle_bp, transform)
+                    if actor:
+                        actor.set_autopilot(False)
+                        control = carla.VehicleControl()
+                        control.hand_brake = True
+                        actor.apply_control(control)
+                        
+                        self.obstacle_vehicles.append(actor)
+                        rospy.loginfo(f"Spawned obstacle {name} at ({x}, {y}, {yaw}°)")
+                    else:
+                        rospy.logwarn(f"Failed to spawn obstacle {name} at ({x}, {y})")
+
+        except Exception as e:
+            rospy.logerr(f"Error spawning obstacles: {e}")
+    
     def carla_to_ros(self, carla_transform, carla_velocity):
         """
         Convert CARLA coordinates to ROS coordinates
-        
-        Args:
-            carla_transform: CARLA Transform object
-            carla_velocity: CARLA Vector3D velocity
-            
-        Returns:
-            tuple: (x_ros, y_ros, yaw_ros, vx_ros, vy_ros)
         """
         # Extract CARLA coordinates (vehicle center)
         x_carla_center = carla_transform.location.x
@@ -461,6 +529,9 @@ class CarlaBridgePy:
                 rospy.loginfo("Vehicle destroyed")
             except Exception as e:
                 rospy.logerr(f"Error destroying vehicle: {e}")
+                
+        # NOT destroying obstacle vehicles per request
+        rospy.loginfo("Obstacle vehicles persist in simulation")
 
 
 def main():
