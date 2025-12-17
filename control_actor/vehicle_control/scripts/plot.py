@@ -30,7 +30,7 @@ COLORS = {
 }
 
 # 文件路径 (请修改为你本地的实际路径)
-FILE_PATH = r'/home/qingliu/TwinPark/twinpark_ws/src/twinpark/control_actor/vehicle_control/logs/guided_mppi_log_20251216_210648.csv'
+FILE_PATH = r'/home/qingliu/TwinPark/twinpark_ws/src/twinpark/control_actor/vehicle_control/logs/velocity_mppi_log_20251217_225744.csv'
 
 # %% 1. 数据读取与处理
 def load_data(file_path):
@@ -274,7 +274,7 @@ def plot_trajectory(data):
     plt.tight_layout()
 
 def plot_controls(data):
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 4))
     ax1.plot(data['time'], data['vir_steer'], color=COLORS['dark_blue'], linewidth=2.5)
     ax1.grid(True)
     ax1.set_xlim([0, max(data['time'])])
@@ -286,30 +286,32 @@ def plot_controls(data):
     ax2.grid(True)
     ax2.set_xlim([0, max(data['time'])])
     ax2.set_xlabel('Time(s)', fontsize=22)
-    ax2.set_ylabel(r'$u_a(\mathrm{m}/\mathrm{s}^2)$', fontsize=22)
+    ax2.set_ylabel(r'$u_v(\mathrm{m}/\mathrm{s}^2)$', fontsize=22)
     ax2.tick_params(labelsize=18, width=2)
     for spine in ax2.spines.values(): spine.set_linewidth(2)
     plt.tight_layout()
 
 def plot_velocities(data):
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
-    ax1.plot(data['time'], data['ref_v'], color=COLORS['green'], linewidth=2.5)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 4))
+    ax1.plot(data['time'], data['vir_vx'], color=COLORS['dark_blue'], linewidth=2.5, label=r'$v_{Vx}$')
+    ax1.plot(data['time'], data['ref_v'], color=COLORS['green'], linewidth=2.5, label=r'$v_{Rx}$')
     ax1.grid(True)
     ax1.set_xlim([0, max(data['time'])])
     ax1.set_ylabel(r'$v_{R}$(m/s)', fontsize=22)
     ax1.tick_params(labelsize=18, width=2)
+    ax1.legend(fontsize=16, loc='right')
     for spine in ax1.spines.values(): spine.set_linewidth(2)
 
     ax2.plot(data['time'], data['vir_v'], color=COLORS['dark_blue'], linewidth=2.5, label=r'$v_{V}$')
-    ax2.plot(data['time'], data['vir_vx'], color=COLORS['red'], linewidth=2.5, label=r'$v_{V_x}$')
-    ax2.plot(data['time'], data['vir_vy'], color=COLORS['green'], linewidth=2.5, label=r'$v_{V_y}$')
+    ax2.plot(data['time'], data['vir_vx'], color=COLORS['red'], linewidth=2.5, label=r'$v_{Vx}$')
+    ax2.plot(data['time'], data['vir_vy'], color=COLORS['green'], linewidth=2.5, label=r'$v_{Vy}$')
     ax2.grid(True)
     ax2.set_xlim([0, max(data['time'])])
     ax2.set_xlabel('Time(s)', fontsize=18)
     ax2.set_ylabel(r'Velocity(m/s)', fontsize=22)
     ax2.tick_params(labelsize=18, width=2)
     for spine in ax2.spines.values(): spine.set_linewidth(2)
-    ax2.legend(fontsize=16, loc='best')
+    ax2.legend(fontsize=16, loc='right')
     plt.tight_layout()
 
 def plot_angular_velocities(data):
@@ -318,7 +320,7 @@ def plot_angular_velocities(data):
     Subplot 1: Reference Omega vs Actual Omega
     Subplot 2: Omega Error
     """
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 4))
     
     # 子图1：参考与实际角速度对比
     ax1.plot(data['time'], data['ref_w'], color=COLORS['green'], linewidth=2.5, label=r'$\omega_{ref}$')
@@ -342,7 +344,7 @@ def plot_angular_velocities(data):
     plt.tight_layout()
 
 def plot_errors(data):
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 6))
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 4))
     def setup_error_ax(ax, y_label, is_bottom=False):
         ax.grid(True)
         ax.set_xlim([0, max(data['time'])])
@@ -400,7 +402,7 @@ def plot_costs(data):
     """
     绘制 MPPI 代价收敛曲线
     """
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=(8, 4))
     
     ax.plot(data['time'], data['mean_cost'], color=COLORS['gray'], alpha=0.6, linewidth=1.5, label='Mean Cost (Sampling Avg)')
     ax.plot(data['time'], data['min_cost'], color=COLORS['purple'], linewidth=2.5, label='Min Cost (Optimal Traj)')

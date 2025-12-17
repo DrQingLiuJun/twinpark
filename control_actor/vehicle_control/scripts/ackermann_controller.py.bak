@@ -1,0 +1,168 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+Custom Python Implementation of Ackermann Control for CARLA 0.9.13
+mimics the behavior of vehicle.apply_ackermann_control()
+
+Fixed: 
+1. Reverse logic mapping.
+2. TUNED PID GAINS: Reduced Kp/Kd for Reverse to prevent oscillation.
+"""
+
+import math
+import time
+from collections import deque
+import carla
+
+class PIDController:
+    def __init__(self, Kp, Ki, Kd, output_min, output_max):
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.min = output_min
+        self.max = output_max
+        self.prev_error = 0.0
+        self.integral = 0.0
+        self.error_buffer = deque(maxlen=10)
+
+    def step(self, error, dt):
+        if dt < 1e-6: return 0.0
+        
+        # Integral with clamping (Anti-windup)
+        self.integral += error * dt
+        
+        # Check validity of Ki to avoid divide by zero
+        if abs(self.Ki) > 1e-5:
+            limit_pos = self.max / self.Ki
+            limit_neg = self.min / self.Ki
+            if self.integral > limit_pos: self.integral = limit_pos
+            elif self.integral < limit_neg: self.integral = limit_neg
+        else:
+            self.integral = 0.0
+
+        derivative = (error - self.prev_error) / dt
+        self.prev_error = error
+        
+        output = self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+        return max(self.min, min(self.max, output))
+    
+    def reset(self):
+        self.prev_error = 0.0
+        self.integral = 0.0
+
+class AckermannController:
+    def __init__(self, vehicle, 
+                 max_steer_deg=45.0, 
+                 wheelbase=2.875):
+        self.vehicle = vehicle
+        self.max_steer_rad = math.radians(max_steer_deg)
+        self.wheelbase = wheelbase
+        
+        # --- PID Tuning (Gain Scheduling) ---
+        # Forward Gains
+        # Increased Ki to fix steady-state error (1.91 vs 2.0)
+        self.kp_fwd = 1.0
+        self.ki_fwd = 0.35 
+        self.kd_fwd = 0.01 
+        
+        # Reverse Gains
+        # Increased Kp significantly (0.6 -> 1.2) for faster startup
+        # Increased Ki (0.1 -> 0.35) to fix static error (-0.8 vs -1.0)
+        self.kp_rev = 0.8  
+        self.ki_rev = 0.35
+        self.kd_rev = 0.05 
+        
+        self.speed_pid = PIDController(Kp=self.kp_fwd, Ki=self.ki_fwd, Kd=self.kd_fwd, output_min=-1.0, output_max=1.0)
+        
+        self.last_time = time.time()
+        # Reduced kick-start throttle for reverse to be gentler
+        self.static_friction_fwd = 0.15 
+        self.static_friction_rev = 0.10 
+
+    def run_step(self, target_speed, target_steer_rad):
+        """
+        Execute one control step.
+        """
+        current_time = time.time()
+        dt = current_time - self.last_time
+        if dt == 0: dt = 0.05
+        self.last_time = current_time
+        
+        # 1. State
+        v_vec = self.vehicle.get_velocity()
+        current_speed = math.sqrt(v_vec.x**2 + v_vec.y**2 + v_vec.z**2)
+        
+        # 2. Gear & Parameter Switching
+        control = carla.VehicleControl()
+        control.manual_gear_shift = True
+        
+        is_reverse = False
+        
+        if target_speed < -0.01:
+            control.gear = -1
+            control.reverse = True
+            is_reverse = True
+            current_speed_signed = -current_speed
+            
+            # Switch to Reverse PID
+            self.speed_pid.Kp = self.kp_rev
+            self.speed_pid.Ki = self.ki_rev
+            self.speed_pid.Kd = self.kd_rev
+            
+        elif target_speed > 0.01:
+            control.gear = 1
+            control.reverse = False
+            current_speed_signed = current_speed
+            
+            # Switch to Forward PID
+            self.speed_pid.Kp = self.kp_fwd
+            self.speed_pid.Ki = self.ki_fwd
+            self.speed_pid.Kd = self.kd_fwd
+        else:
+            control.gear = 1
+            control.reverse = False
+            current_speed_signed = current_speed
+            
+        # 3. Error
+        error = target_speed - current_speed_signed
+        
+        # 4. PID Step
+        cmd = self.speed_pid.step(error, dt)
+        
+        # 5. Steer
+        control.steer = max(-1.0, min(1.0, target_steer_rad / self.max_steer_rad))
+        
+        # 6. Throttle/Brake Logic
+        if abs(target_speed) < 0.01:
+            # Full stop
+            control.throttle = 0.0
+            control.brake = 1.0
+            self.speed_pid.reset()
+        else:
+            if is_reverse:
+                # REVERSE MODE
+                # cmd < 0: Need more negative speed (Throttle)
+                # cmd > 0: Need to slow down (Brake)
+                if cmd < 0:
+                    raw_throttle = abs(cmd)
+                    # Add soft static boost
+                    boost = self.static_friction_rev if abs(error) > 0.1 else 0.0
+                    control.throttle = min(1.0, raw_throttle + boost)
+                    control.brake = 0.0
+                else:
+                    control.throttle = 0.0
+                    control.brake = min(1.0, cmd)
+            else:
+                # FORWARD MODE
+                if cmd > 0:
+                    raw_throttle = cmd
+                    boost = self.static_friction_fwd if abs(error) > 0.1 else 0.0
+                    control.throttle = min(1.0, raw_throttle + boost)
+                    control.brake = 0.0
+                else:
+                    control.throttle = 0.0
+                    control.brake = min(1.0, abs(cmd))
+        
+        self.vehicle.apply_control(control)
+        return control

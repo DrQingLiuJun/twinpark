@@ -138,17 +138,20 @@ class RobustMPPIController:
 
     def _update_tracking_index(self, observed_x):
         """
-        Standard Monotonic Tracking (Reverted logic).
-        We rely on physics boost to move the car, not index manipulation.
+        Improved Monotonic Tracking with direction change handling.
+        Key improvements:
+        1. Detect direction change points (where ref_v changes sign)
+        2. Force index advancement when near direction change points
+        3. Use time-based advancement as fallback
         """
         if self.ref_path is None:
             return 0.0, 0
 
+        if self.last_closest_idx >= len(self.ref_path) - 1:
+            return self.ref_times[-1], len(self.ref_path) - 1
+
         search_start = self.last_closest_idx
-        search_end = min(len(self.ref_path), search_start + 50)
-        
-        if search_start >= len(self.ref_path) - 1:
-             return self.ref_times[-1], len(self.ref_path)-1
+        search_end = min(len(self.ref_path), search_start + 80)  # 扩大搜索范围
 
         best_idx = search_start
         min_dist_sq = float('inf')
@@ -160,6 +163,42 @@ class RobustMPPIController:
             if d_sq < min_dist_sq:
                 min_dist_sq = d_sq
                 best_idx = i
+        
+        # 检测是否在换向点附近
+        # 换向点特征：ref_v 接近 0 且前后符号不同
+        current_ref_v = self.ref_path[best_idx, 3]
+        is_near_direction_change = False
+        
+        # 检查当前点是否是换向点（速度接近0）
+        if abs(current_ref_v) < 0.15:
+            # 检查前后速度符号
+            look_back = max(0, best_idx - 5)
+            look_ahead = min(len(self.ref_path) - 1, best_idx + 5)
+            v_before = self.ref_path[look_back, 3]
+            v_after = self.ref_path[look_ahead, 3]
+            
+            # 如果前后速度符号不同，说明是换向点
+            if v_before * v_after < 0:
+                is_near_direction_change = True
+        
+        # 如果在换向点附近且车辆速度很低，强制推进索引
+        current_v = observed_x[3]
+        if is_near_direction_change and abs(current_v) < 0.1:
+            # 计算到当前参考点的距离
+            dist_to_ref = np.sqrt(min_dist_sq)
+            
+            # 如果距离足够近（< 0.5m），强制推进到换向点之后
+            if dist_to_ref < 0.5:
+                # 找到换向点之后的第一个有速度的点
+                for i in range(best_idx, min(best_idx + 30, len(self.ref_path))):
+                    if abs(self.ref_path[i, 3]) > 0.1:
+                        best_idx = i
+                        rospy.loginfo_throttle(1.0, f"Direction change detected! Advancing index to {best_idx}, ref_v={self.ref_path[i, 3]:.2f}")
+                        break
+        
+        # 防止索引后退（单调递增）
+        if best_idx < self.last_closest_idx:
+            best_idx = self.last_closest_idx
         
         self.last_closest_idx = best_idx
         return self.ref_times[best_idx], best_idx
@@ -404,13 +443,45 @@ class MPPIControlNode:
         current_v = observed_x[3]
         ref_v = self.mppi.current_ref_point_debug[3] if self.mppi.current_ref_point_debug is not None else 0.0
         
+        # 检查未来几个点的速度，判断是否需要启动
+        future_wants_move = False
+        if self.mppi.ref_path is not None:
+            look_ahead_idx = min(self.mppi.last_closest_idx + 10, len(self.mppi.ref_path) - 1)
+            future_ref_v = self.mppi.ref_path[look_ahead_idx, 3]
+            if abs(future_ref_v) > 0.1:
+                future_wants_move = True
+        
         # Thresholds
-        STOP_THRESH = 0.05
-        MOVE_REQ_THRESH = 0.1
-        MIN_KICK_THROTTLE = 0.18 # 18% throttle boost (Adjust based on vehicle weight)
+        STOP_THRESH = 0.08
+        MOVE_REQ_THRESH = 0.08  # 降低阈值，更容易触发启动
+        MIN_KICK_THROTTLE = 0.22  # 22% throttle boost (Adjust based on vehicle weight)
         
         is_stuck = abs(current_v) < STOP_THRESH
-        wants_to_move = abs(ref_v) > MOVE_REQ_THRESH
+        wants_to_move = abs(ref_v) > MOVE_REQ_THRESH or future_wants_move
+        
+        # 检测是否在换向点：当前速度接近0，但未来需要反向运动
+        at_direction_change = False
+        if self.mppi.ref_path is not None and is_stuck:
+            idx = self.mppi.last_closest_idx
+            # 检查前后速度符号
+            look_back = max(0, idx - 5)
+            look_ahead = min(len(self.mppi.ref_path) - 1, idx + 10)
+            v_before = self.mppi.ref_path[look_back, 3]
+            v_after = self.mppi.ref_path[look_ahead, 3]
+            
+            if v_before * v_after < 0:  # 符号不同，是换向点
+                at_direction_change = True
+                # 根据未来速度方向决定档位
+                if v_after < -0.05:
+                    target_gear = -1
+                    cmd.reverse = True
+                    cmd.gear = -1
+                    rospy.loginfo_throttle(1.0, f"At direction change point! Switching to REVERSE, v_after={v_after:.2f}")
+                elif v_after > 0.05:
+                    target_gear = 1
+                    cmd.reverse = False
+                    cmd.gear = 1
+                    rospy.loginfo_throttle(1.0, f"At direction change point! Switching to FORWARD, v_after={v_after:.2f}")
         
         if target_gear == 1:
             if u_Vaccel > 0: 
@@ -423,10 +494,10 @@ class MPPIControlNode:
                 cmd.brake = 0.0
             else: 
                 cmd.throttle = 0.0; cmd.brake = min(-u_Vaccel/self.max_accel, 1.0)
-        else:
+        else:  # target_gear == -1 (倒车)
             if u_Vaccel < 0: 
                 raw_throttle = min(-u_Vaccel/self.max_accel, 1.0)
-                # Apply Kick
+                # Apply Kick - 倒车启动时也需要推一把
                 if is_stuck and wants_to_move:
                     cmd.throttle = max(raw_throttle, MIN_KICK_THROTTLE)
                 else:
@@ -434,6 +505,12 @@ class MPPIControlNode:
                 cmd.brake = 0.0
             else: 
                 cmd.throttle = 0.0; cmd.brake = min(u_Vaccel/self.max_accel, 1.0)
+        
+        # 在换向点，如果车已停稳但需要反向运动，给一个启动油门
+        if at_direction_change and is_stuck and wants_to_move:
+            cmd.throttle = max(cmd.throttle, MIN_KICK_THROTTLE)
+            cmd.brake = 0.0
+            rospy.loginfo_throttle(0.5, f"Kick-start at direction change! throttle={cmd.throttle:.2f}, gear={target_gear}")
 
         # Force Stop Logic at Destination (if index is near end)
         if self.mppi.ref_path is not None:

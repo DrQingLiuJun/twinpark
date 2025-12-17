@@ -551,7 +551,7 @@ def generate_trajectory(path):
         
         # 5. 在倒车段开始前插入停顿 (Stop Padding)
         if j > 0: 
-            STOP_FRAMES = 20 # 停 1 秒
+            STOP_FRAMES = 0 # 停 1 秒
             
             stop_x = [seg_x[0]] * STOP_FRAMES
             stop_y = [seg_y[0]] * STOP_FRAMES

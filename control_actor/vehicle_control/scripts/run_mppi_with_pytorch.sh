@@ -6,4 +6,4 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate mppi
 
 # 运行 MPPI 控制节点
-exec python3 "$(dirname "$0")/hybrid_Astar_mppi_control.py" "$@"
+exec python3 "$(dirname "$0")/hybrid_Astar_mppi_control_velocity.py" "$@"

@@ -185,22 +185,23 @@ mppi_control_node:
 # ============================================================================
 hybrid_mppi_control:
   delta_t: 0.05
-  horizon_T: 30              # 1.5s 视界
-  num_samples_K: 500
+  horizon_T: 40              # 2.0s 视界，提高前瞻性
+  num_samples_K: 800         # 增加采样数，提高优化质量
   exploration: 0.05
   
-  # 稳定性调整
-  lambda: 50.0               # [降低] 80->20。允许 MPPI 在遇到误差时，更灵活地偏离名义轨迹去修正，而不是死板地贴着。
-  alpha: 0.2                 # [增加] 0.05->0.3。增加历史控制量的平滑权重，物理上抑制高频震荡。
+  # 核心参数优化 - 大幅提高误差权重
+  lambda: 30.0          # 降低温度，更关注低代价轨迹
+  alpha: 0.1            # 降低平滑系数，更关注当前误差
   
-  sigma_steer: 0.08          
-  sigma_accel: 0.3          # 给予足够的油门探索空间
+  sigma_steer: 0.12     # 增加探索
+  sigma_vel: 0.3        # 增加探索
   
-  # 权重微调：降低速度权重，避免对未来速度变化过度敏感
-  stage_cost_weight: [10.0, 40.0, 40.0, 80.0]      
-  terminal_cost_weight: [20.0, 80.0, 80.0, 20.0] 
+  # 权重大幅提升 - 减少对前馈的依赖
+  stage_cost_weight: [50.0, 100.0, 120.0, 150.0]      
+  terminal_cost_weight: [200.0, 300.0, 400.0, 100.0]  # 终端权重极大提升 
   
   wheelbase: 3.368
   max_steer: 45.0
   max_accel: 1.5             # 限制最大加速度输出，物理上减缓震荡
   publish_rate: 20.0
+  max_speed_abs: 2.0

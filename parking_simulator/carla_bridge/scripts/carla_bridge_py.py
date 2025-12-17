@@ -4,14 +4,24 @@
 """
 CARLA Bridge Node - Python Implementation
 Connects CARLA simulator with ROS ecosystem
+Supports both ControlCmd (throttle/brake) and AckermannCmd (velocity control)
 """
 
 import rospy
 import carla
 import math
 import sys
-from vehicle_msgs.msg import VehicleState, ControlCmd, Trajectory
+import os
+
+from vehicle_msgs.msg import VehicleState, ControlCmd, Trajectory, AckermannCmd
 from geometry_msgs.msg import PoseStamped
+
+# Add vehicle_control scripts path for AckermannController
+scripts_path = os.path.join(os.path.dirname(__file__), '../../../control_actor/vehicle_control/scripts')
+if scripts_path not in sys.path:
+    sys.path.insert(0, scripts_path)
+
+from ackermann_controller import AckermannController
 
 
 class CarlaBridgePy:
@@ -33,6 +43,7 @@ class CarlaBridgePy:
         # ROS publishers and subscribers
         self.state_pub = rospy.Publisher('/vehicle_state', VehicleState, queue_size=10)
         self.control_sub = rospy.Subscriber('/control_cmd', ControlCmd, self.control_callback)
+        self.ackermann_sub = rospy.Subscriber('/ackermann_cmd', AckermannCmd, self.ackermann_callback)
         self.trajectory_sub = rospy.Subscriber('/planned_trajectory', Trajectory, self.trajectory_callback)
         
         # Control command buffer
@@ -42,6 +53,11 @@ class CarlaBridgePy:
         self.current_control.steer = 0.0
         self.current_control.gear = 1
         self.current_control.reverse = False
+        
+        # Ackermann control
+        self.ackermann_controller = None  # Will be initialized after vehicle spawn
+        self.current_ackermann_cmd = None
+        self.use_ackermann_control = False  # Flag to switch control mode
         
         # Trajectory visualization
         self.planned_trajectory = None
@@ -167,6 +183,15 @@ class CarlaBridgePy:
             # Spawn vehicle
             self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_transform)
             rospy.loginfo(f"Vehicle spawned successfully")
+            
+            # Initialize Ackermann controller
+            max_steer_deg = rospy.get_param('~mppi_control_node/max_steer', 45.0)
+            self.ackermann_controller = AckermannController(
+                self.vehicle,
+                max_steer_deg=max_steer_deg,
+                wheelbase=self.wheelbase
+            )
+            rospy.loginfo("AckermannController initialized")
             
         except Exception as e:
             rospy.logerr(f"Failed to spawn vehicle: {e}")
@@ -346,13 +371,26 @@ class CarlaBridgePy:
     
     def control_callback(self, msg):
         """
-        Callback for control command
+        Callback for control command (throttle/brake mode)
         
         Args:
             msg: ControlCmd message
         """
         self.current_control = msg
+        self.use_ackermann_control = False  # Switch to direct control mode
         self.apply_control()
+    
+    def ackermann_callback(self, msg):
+        """
+        Callback for Ackermann control command (velocity mode)
+        Uses AckermannController.run_step() for low-level control
+        
+        Args:
+            msg: AckermannCmd message with target_speed and target_steer
+        """
+        self.current_ackermann_cmd = msg
+        self.use_ackermann_control = True  # Switch to Ackermann control mode
+        self.apply_ackermann_control()
     
     def trajectory_callback(self, msg):
         """
@@ -469,8 +507,36 @@ class CarlaBridgePy:
         except Exception as e:
             rospy.logerr(f"Error drawing actual trajectory in CARLA: {e}")
     
+    def apply_ackermann_control(self):
+        """
+        Apply Ackermann control using AckermannController.run_step()
+        This handles velocity control with PID internally
+        """
+        if self.vehicle is None or self.ackermann_controller is None:
+            return
+        
+        if self.current_ackermann_cmd is None:
+            return
+        
+        try:
+            target_speed = self.current_ackermann_cmd.target_speed
+            target_steer_rad = self.current_ackermann_cmd.target_steer
+            
+            # Note: Negate steer to match coordinate system transformation (ROS -> CARLA)
+            carla_steer_rad = -target_steer_rad
+            
+            # Use AckermannController for velocity control
+            self.ackermann_controller.run_step(target_speed, carla_steer_rad)
+            
+            # Update current_control for state feedback
+            self.current_control.reverse = (target_speed < 0)
+            self.current_control.gear = -1 if target_speed < 0 else 1
+            
+        except Exception as e:
+            rospy.logerr(f"Error applying Ackermann control: {e}")
+    
     def apply_control(self):
-        """Apply control command to CARLA vehicle"""
+        """Apply control command to CARLA vehicle (direct throttle/brake mode)"""
         if self.vehicle is None:
             return
         

@@ -17,6 +17,7 @@ add_message_files(
   VehicleState.msg
   Trajectory.msg
   ControlCmd.msg
+  AckermannCmd.msg
 )
 
 ## Generate added messages and services with any dependencies listed here
