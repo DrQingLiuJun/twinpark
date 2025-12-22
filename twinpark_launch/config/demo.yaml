@@ -9,15 +9,18 @@ carla:
   host: "localhost"
   port: 2000
   timeout: 10.0
-  
+
+  # Mode select: 0 - None, 1 - Only virtual, 2 - Both virtual and Physical
+  mode: 2
+
   # Vehicle selection filter
   vehicle_filter: "haut"
   
   # Vehicle spawn point (ROS coordinates)
   # ROS frame: yaw=0° points right (+X), yaw=90° points up (+Y)
-  spawn_point:
-    x: -18.3      # ROS X coordinate
-    y: -5.68     # ROS Y coordinate  
+  spawn_point: # [-18.606, -6.748]
+    x: -18.606      # ROS X coordinate
+    y: -6.748     # ROS Y coordinate  
     z: 0.05
     yaw: 90.0     # degrees in ROS frame (vehicle should point up/+Y for forward parking)
   
@@ -67,7 +70,7 @@ planner_node:
   
   # Obstacle Map Configuration
   obstacles:
-    x_bounds: [9.476, 27.401]    # X bounds of the environment
+    x_bounds: [-9.476, -27.401]    # X bounds of the environment
     y_bounds: [-10.101, 14.377]  # Y bounds of the environment
 
     static_vehicles:

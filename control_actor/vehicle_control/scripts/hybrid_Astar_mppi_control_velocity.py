@@ -507,7 +507,7 @@ class VelocityMPPINode:
             stage_cost_weight=self.stage_cost_weight,
             terminal_cost_weight=self.terminal_cost_weight,
         )
-        
+        self.mode = 2 # 1 - 单独虚拟端控制； 2 - 虚拟端与物理端同步控制 
         self.current_state = None
         self.catch_traj = False
         self.catch_phy = False
@@ -518,7 +518,7 @@ class VelocityMPPINode:
         
         self.state_sub = rospy.Subscriber('/vehicle_state', VehicleState, self.state_callback)
         self.planned_traj_sub = rospy.Subscriber('/planned_trajectory', Trajectory, self.trajectory_callback)
-        self.phy_state_sub = rospy.Subscriber('/xtark/phy_state', Float32MultiArray, self.phy_state_callback)
+        self.phy_state_sub = rospy.Subscriber('/wheeltec/phy_state', Float32MultiArray, self.phy_state_callback)
         
         self.control_rate = rospy.Rate(self.publish_rate)
         
@@ -592,7 +592,13 @@ class VelocityMPPINode:
         self.phy_state_data = msg.data[:20] 
     
     def compute_control_cmd(self):
+        # 未收到当前状态，也未收到轨迹
         if self.current_state is None or not self.catch_traj:
+            return None
+        
+        # 使用虚实同步控制，但未收到物理端消息
+        if self.mode == 2 and not self.catch_phy:
+            rospy.logwarn_throttle(3.0, f"[CSV] No physical vehicle data received.")
             return None
         
         observed_x = np.array([
@@ -703,10 +709,6 @@ class VelocityMPPINode:
             
             # 2. Physical Car Data (Appended 20 cols)
             row_phy = self.phy_state_data
-
-            if not self.catch_phy:
-                # rospy.logwarn_throttle(5.0, f"[CSV] No physical vehicle data received.")
-                pass
 
             # Combine
             full_row = row_vir + list(row_phy)
