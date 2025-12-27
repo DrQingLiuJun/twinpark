@@ -1,0 +1,27 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/qingliu/TwinPark/twinpark_ws/devel/include/**",
+        "/opt/ros/melodic/include/**",
+        "/home/qingliu/TwinPark/twinpark_ws/src/twinpark/parking_simulator/carla_bridge/include/**",
+        "/home/qingliu/TwinPark/twinpark_ws/src/twinpark/plan_eval/planner/include/**",
+        "/home/qingliu/TwinPark/twinpark_ws/src/twinpark/parking_simulator/Utils/pose_utils/include/**",
+        "/home/qingliu/TwinPark/twinpark_ws/src/twinpark/plan_eval/rollout/include/**",
+        "/home/qingliu/TwinPark/twinpark_ws/src/twinpark/control_actor/traj_server/include/**",
+        "/home/qingliu/TwinPark/twinpark_ws/src/twinpark/control_actor/vehicle_control/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}
